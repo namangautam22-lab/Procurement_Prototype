@@ -10,7 +10,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script>
+  <script id="tw-config">
     tailwind.config = {
       theme: {
         extend: {
@@ -28,8 +28,6 @@
     .gradient-text { background: linear-gradient(90deg, #1e6bff 0%, #14b8a6 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
     .gradient-bg { background: linear-gradient(135deg, #1e6bff 0%, #14b8a6 100%); }
     .gradient-bg-soft { background: linear-gradient(135deg, rgba(30,107,255,0.10) 0%, rgba(20,184,166,0.10) 100%); }
-    .gradient-border { position: relative; }
-    .gradient-border::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, #1e6bff, #14b8a6); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
     @keyframes fadeInUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
     .fade-in { animation: fadeInUp 0.32s cubic-bezier(.2,.7,.3,1) forwards; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -53,7 +51,7 @@
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
   <div id="root"></div>
-  <script>
+  <script id="app-script">
 const {
   useState,
   useEffect,
@@ -64,10 +62,15 @@ const {
 } = React;
 
 /* ============================================================
-   DATA — 5 scenarios, scripted but realistic
+   POLICY (internal — never displayed as a rupee amount)
    ============================================================ */
-
 const POLICY_THRESHOLD = 50000;
+
+/* ============================================================
+   SCENARIOS — `lastPrice` and `rounds` arrays are kept internally
+   for math but NEVER shown as rupee figures. UI displays index,
+   percent-below-baseline, or qualitative tier.
+   ============================================================ */
 const SCENARIOS = {
   cartridges: {
     id: 'cartridges',
@@ -77,18 +80,30 @@ const SCENARIOS = {
     requestText: 'Reorder 500 printer cartridges, same as last quarter',
     item: 'HP printer cartridges (mixed black & color)',
     category: 'Office Supplies · Print',
+    categoryCode: 'PRINT_CONSUMABLES',
+    intent: 'REORDER_KNOWN_SKU',
+    bu: 'finance-mh',
     quantity: 500,
     unitShort: 'unit',
     unitLabel: 'cartridges',
     lastVendor: 'InkJet Bharat',
     lastPrice: 450,
-    targetPrice: 400,
     region: 'IN · pan-India',
+    discovered: 247,
+    creditDist: [4, 8, 12],
+    esgPass: 18,
+    esgFlag: 6,
+    msmeCount: 9,
+    targetIndex: 88,
+    floorIndex: 85,
     vendors: [{
       name: 'InkJet Bharat',
       rating: 4.6,
       location: 'Pune',
       sla: '48hr',
+      credit: 'A',
+      esg: 'pass',
+      msme: true,
       rounds: [460, 430, 410, 395],
       dropOutAfterRound: null
     }, {
@@ -96,6 +111,9 @@ const SCENARIOS = {
       rating: 4.3,
       location: 'Delhi NCR',
       sla: '72hr',
+      credit: 'A',
+      esg: 'pass',
+      msme: false,
       rounds: [470, 445, 420, 405],
       dropOutAfterRound: null
     }, {
@@ -103,6 +121,9 @@ const SCENARIOS = {
       rating: 4.4,
       location: 'Bengaluru',
       sla: '60hr',
+      credit: 'B+',
+      esg: 'pass',
+      msme: true,
       rounds: [455, 425, 408, 400],
       dropOutAfterRound: null
     }],
@@ -118,18 +139,30 @@ const SCENARIOS = {
     requestText: 'Office stationery bundle for the Mumbai team',
     item: 'Stationery bundle (notebooks, pens, files, sticky notes — 25 SKUs)',
     category: 'Office Supplies · Stationery',
+    categoryCode: 'OFFICE_STATIONERY',
+    intent: 'NEW_BUNDLE_REQUEST',
+    bu: 'ops-mumbai',
     quantity: 1,
     unitShort: 'bundle',
     unitLabel: 'bundle',
     lastVendor: 'PaperPlus Traders',
     lastPrice: 14200,
-    targetPrice: 12500,
     region: 'IN · Maharashtra',
+    discovered: 86,
+    creditDist: [3, 6, 9],
+    esgPass: 11,
+    esgFlag: 3,
+    msmeCount: 7,
+    targetIndex: 88,
+    floorIndex: 85,
     vendors: [{
       name: 'PaperPlus Traders',
       rating: 4.5,
       location: 'Mumbai',
       sla: '24hr',
+      credit: 'A',
+      esg: 'pass',
+      msme: true,
       rounds: [14200, 12900, 12400],
       dropOutAfterRound: null
     }, {
@@ -137,6 +170,9 @@ const SCENARIOS = {
       rating: 4.2,
       location: 'Mumbai',
       sla: '48hr',
+      credit: 'B+',
+      esg: 'pass',
+      msme: true,
       rounds: [14500, 13200, 12800],
       dropOutAfterRound: null
     }, {
@@ -144,6 +180,9 @@ const SCENARIOS = {
       rating: 4.0,
       location: 'Thane',
       sla: '48hr',
+      credit: 'B',
+      esg: 'pass',
+      msme: false,
       rounds: [15000, 13800, 13100],
       dropOutAfterRound: null
     }],
@@ -157,20 +196,32 @@ const SCENARIOS = {
     accent: 'from-amber-500 to-orange-500',
     chipLabel: 'Monthly pantry & coffee supplies refill',
     requestText: 'Monthly pantry & coffee supplies refill',
-    item: 'Pantry & coffee refill (monthly HQ bundle — coffee beans, tea, snacks, milk)',
+    item: 'Pantry & coffee refill (monthly HQ bundle)',
     category: 'Pantry & Beverages',
+    categoryCode: 'PANTRY_BEVERAGES',
+    intent: 'RECURRING_REFILL',
+    bu: 'admin-mumbai',
     quantity: 1,
     unitShort: 'month',
     unitLabel: 'monthly refill',
     lastVendor: 'GreenBean Suppliers',
     lastPrice: 38000,
-    targetPrice: 34000,
     region: 'IN · Maharashtra',
+    discovered: 142,
+    creditDist: [5, 9, 10],
+    esgPass: 16,
+    esgFlag: 4,
+    msmeCount: 8,
+    targetIndex: 89,
+    floorIndex: 86,
     vendors: [{
       name: 'GreenBean Suppliers',
       rating: 4.7,
       location: 'Mumbai',
       sla: '24hr',
+      credit: 'A+',
+      esg: 'pass',
+      msme: true,
       rounds: [39000, 36500, 34800, 33500],
       dropOutAfterRound: null
     }, {
@@ -178,6 +229,9 @@ const SCENARIOS = {
       rating: 4.1,
       location: 'Pune',
       sla: '48hr',
+      credit: 'B',
+      esg: 'pass',
+      msme: false,
       rounds: [38500, 35800, null, null],
       dropOutAfterRound: 1
     }, {
@@ -185,6 +239,9 @@ const SCENARIOS = {
       rating: 4.3,
       location: 'Mumbai',
       sla: '24hr',
+      credit: 'A',
+      esg: 'pass',
+      msme: true,
       rounds: [40000, 37200, 35600, 34200],
       dropOutAfterRound: null
     }],
@@ -198,21 +255,32 @@ const SCENARIOS = {
     accent: 'from-cyan-500 to-blue-500',
     chipLabel: 'Cleaning supplies for 3 floors',
     requestText: 'Cleaning supplies for 3 floors',
-    item: 'Cleaning supplies for 3 floors (monthly — sanitizer, wipes, detergent, gloves)',
+    item: 'Cleaning supplies for 3 floors (monthly)',
     category: 'Facilities · Cleaning',
+    categoryCode: 'FACILITIES_CLEANING',
+    intent: 'RECURRING_REFILL',
+    bu: 'facilities-mh',
     quantity: 1,
     unitShort: 'month',
     unitLabel: 'monthly supply',
     lastVendor: 'CleanCo Services',
     lastPrice: 22000,
-    targetPrice: 19500,
     region: 'IN · Maharashtra',
-    floorReached: 20200,
+    discovered: 198,
+    creditDist: [6, 11, 14],
+    esgPass: 20,
+    esgFlag: 5,
+    msmeCount: 11,
+    targetIndex: 90,
+    floorIndex: 91,
     vendors: [{
       name: 'CleanCo Services',
       rating: 4.4,
       location: 'Mumbai',
       sla: '24hr',
+      credit: 'A',
+      esg: 'pass',
+      msme: true,
       rounds: [22500, 21000, 20400, 20200],
       dropOutAfterRound: null,
       hitFloor: true
@@ -221,6 +289,9 @@ const SCENARIOS = {
       rating: 4.2,
       location: 'Pune',
       sla: '48hr',
+      credit: 'B+',
+      esg: 'pass',
+      msme: true,
       rounds: [23000, 21500, 20800, 20500],
       dropOutAfterRound: null
     }, {
@@ -228,6 +299,9 @@ const SCENARIOS = {
       rating: 4.0,
       location: 'Navi Mumbai',
       sla: '36hr',
+      credit: 'B',
+      esg: 'pass',
+      msme: false,
       rounds: [22800, 21200, 20600, 20300],
       dropOutAfterRound: null
     }],
@@ -243,18 +317,30 @@ const SCENARIOS = {
     requestText: '50 wireless mice and keyboards for new hires',
     item: 'Wireless mouse + keyboard sets (employee-grade)',
     category: 'IT Hardware · Peripherals',
+    categoryCode: 'IT_PERIPHERALS',
+    intent: 'NEW_HIRE_KIT',
+    bu: 'it-pan-in',
     quantity: 50,
     unitShort: 'set',
     unitLabel: 'sets',
     lastVendor: 'TechSource India',
     lastPrice: 1850,
-    targetPrice: 1650,
     region: 'IN · pan-India',
+    discovered: 312,
+    creditDist: [7, 14, 18],
+    esgPass: 24,
+    esgFlag: 8,
+    msmeCount: 12,
+    targetIndex: 89,
+    floorIndex: 86,
     vendors: [{
       name: 'TechSource India',
       rating: 4.5,
       location: 'Bengaluru',
       sla: '72hr',
+      credit: 'A+',
+      esg: 'pass',
+      msme: true,
       rounds: [1890, 1750, 1680, 1640],
       dropOutAfterRound: null
     }, {
@@ -262,6 +348,9 @@ const SCENARIOS = {
       rating: 4.3,
       location: 'Gurugram',
       sla: '96hr',
+      credit: 'A',
+      esg: 'pass',
+      msme: false,
       rounds: [1920, 1800, 1720, 1690],
       dropOutAfterRound: null
     }, {
@@ -269,11 +358,14 @@ const SCENARIOS = {
       rating: 4.2,
       location: 'Mumbai',
       sla: '72hr',
+      credit: 'B+',
+      esg: 'pass',
+      msme: true,
       rounds: [1850, 1740, 1670, 1650],
       dropOutAfterRound: null
     }],
     winnerIndex: 0,
-    consolidationNote: 'Recommend consolidating 3 IT peripheral vendors into 1 preferred supplier. Projected annual savings ₹1.2 Cr across 8 BUs.',
+    consolidationNote: 'Across 8 BUs there are 3 overlapping IT peripheral vendors. Consolidating to a single preferred supplier projects ~14% additional savings.',
     flavor: 'Larger IT order · requires human approval + a consolidation insight'
   }
 };
@@ -281,7 +373,8 @@ const SCENARIOS = {
 /* ============================================================
    HELPERS
    ============================================================ */
-
+const indexOf = (p, b) => Math.round(p / b * 100);
+const pctBelow = (p, b) => Math.round((b - p) / b * 1000) / 10;
 const formatINR = n => '₹' + Number(n).toLocaleString('en-IN');
 const formatINRShort = n => {
   if (n >= 10000000) return '₹' + (n / 10000000).toFixed(2) + ' Cr';
@@ -290,21 +383,22 @@ const formatINRShort = n => {
   return '₹' + n;
 };
 const computeTotals = s => {
-  const w = s.vendors[s.winnerIndex];
-  const finalUnit = w.rounds[w.rounds.length - 1];
-  const startingUnit = s.lastPrice;
+  const winner = s.vendors[s.winnerIndex];
+  const finalUnit = winner.rounds[winner.rounds.length - 1];
   const finalTotal = finalUnit * s.quantity;
-  const startingTotal = startingUnit * s.quantity;
-  const savings = startingTotal - finalTotal;
-  const savingsPct = savings / startingTotal * 100;
+  const baselineTotal = s.lastPrice * s.quantity;
+  const finalIndex = indexOf(finalUnit, s.lastPrice);
+  const savingsPct = pctBelow(finalUnit, s.lastPrice);
+  const tier = finalTotal >= POLICY_THRESHOLD ? 'material' : 'standard';
+  const requiresHuman = tier === 'material';
   return {
-    finalUnit,
-    startingUnit,
-    finalTotal,
-    startingTotal,
-    savings,
+    winner,
+    finalIndex,
     savingsPct,
-    winner: w
+    tier,
+    requiresHuman,
+    finalTotal,
+    baselineTotal
   };
 };
 const STEPS = [{
@@ -323,11 +417,242 @@ const STEPS = [{
   key: 'outcome',
   label: 'Outcome'
 }];
+const PHASES = [{
+  id: 'planning',
+  label: 'Intent & Planning',
+  tone: 'blue',
+  icon: 'human',
+  short: 'Planning'
+}, {
+  id: 'listing',
+  label: 'Listing & Discovery',
+  tone: 'teal',
+  icon: 'search',
+  short: 'Listing'
+}, {
+  id: 'strategy',
+  label: 'Negotiation Strategy',
+  tone: 'violet',
+  icon: 'sparkles',
+  short: 'Strategy'
+}, {
+  id: 'rounds',
+  label: 'Multi-Round Negotiation',
+  tone: 'emerald',
+  icon: 'graph',
+  short: 'Rounds'
+}, {
+  id: 'governance',
+  label: 'Governance & Policy',
+  tone: 'amber',
+  icon: 'shield',
+  short: 'Governance'
+}, {
+  id: 'closure',
+  label: 'Closure & Audit',
+  tone: 'rose',
+  icon: 'check',
+  short: 'Closure'
+}];
 
 /* ============================================================
-   ICONS — inline SVG (no emoji)
+   LOG BUILDERS — rich, sub-agent-level events per phase
    ============================================================ */
+const buildPlanningLogs = s => [{
+  phase: 'planning',
+  agent: 'Supervisor',
+  sub: 'intent_classifier()',
+  tone: 'blue',
+  msg: `request parsed → category=<b>${s.categoryCode}</b> · intent=<b>${s.intent}</b> · qty=<b>${s.quantity}</b> · region=${s.region}`
+}, {
+  phase: 'planning',
+  agent: 'Supervisor',
+  sub: 'intent_classifier.confidence()',
+  tone: 'blue',
+  msg: `confidence <b>0.94</b> · disambiguation skipped · no clarifying question needed`
+}, {
+  phase: 'planning',
+  agent: 'Supervisor',
+  sub: 'routing_planner()',
+  tone: 'blue',
+  msg: `agent graph queued: <b>Listing → Negotiator → Governance → Closer</b>`
+}, {
+  phase: 'planning',
+  agent: 'Memory',
+  sub: 'short_term.init()',
+  tone: 'violet',
+  msg: `session ctx loaded · user=<b>priya.sharma</b> · org=coca-cola.in · BU=${s.bu}`
+}, {
+  phase: 'planning',
+  agent: 'Memory',
+  sub: 'long_term.fetch("purchase_history", 12mo)',
+  tone: 'violet',
+  msg: `<b>4 prior orders</b> retrieved · last from <b>"${s.lastVendor}"</b> @ <b>${formatINR(s.lastPrice)}</b>/${s.unitShort}`
+}, {
+  phase: 'planning',
+  agent: 'Memory',
+  sub: 'semantic_cache.lookup()',
+  tone: 'violet',
+  msg: `2 semantically similar past requests · pattern matched → re-use shortlist scoring weights`
+}, {
+  phase: 'planning',
+  agent: 'Knowledge',
+  sub: 'rag.policy_engine.fetch()',
+  tone: 'amber',
+  msg: `loaded <b>P-04.2</b> (auto-approve ≤ ${formatINR(POLICY_THRESHOLD)}) · <b>P-09.1</b> (vendor ESG) · <b>P-12.4</b> (MSME quotas)`
+}];
+const buildListingLogs = s => [{
+  phase: 'listing',
+  agent: 'Listing',
+  sub: 'vendor_discovery.search()',
+  tone: 'teal',
+  msg: `supplier_network.query(category="${s.categoryCode}", region="${s.region}") → <b>${s.discovered} candidates</b>`
+}, {
+  phase: 'listing',
+  agent: 'Listing',
+  sub: 'profile_enricher.credit_lookup()',
+  tone: 'teal',
+  msg: `batch enriched top 24 · Crisil distribution: <b>A+ ${s.creditDist[0]} · A ${s.creditDist[1]} · B+ ${s.creditDist[2]}</b>`
+}, {
+  phase: 'listing',
+  agent: 'Listing',
+  sub: 'profile_enricher.esg_audit()',
+  tone: 'teal',
+  msg: `<b>${s.esgPass} pass</b>, ${s.esgFlag} flagged · adversarial supplier list cross-checked`
+}, {
+  phase: 'listing',
+  agent: 'Listing',
+  sub: 'profile_enricher.msme_check()',
+  tone: 'teal',
+  msg: `<b>${s.msmeCount} MSME</b> finalists · helps meet GoI procurement quota`
+}, {
+  phase: 'listing',
+  agent: 'Listing',
+  sub: 'shortlister.apply_filters()',
+  tone: 'teal',
+  msg: `credit ≥ B, ESG=pass, distance ≤ 1500km · <b>6 finalists</b>`
+}, {
+  phase: 'listing',
+  agent: 'Listing',
+  sub: 'shortlister.rank()',
+  tone: 'teal',
+  msg: `composite score (price 40% · SLA 30% · ESG 20% · MSME 10%) · <b>top 3 selected</b>`
+}, {
+  phase: 'listing',
+  agent: 'Memory',
+  sub: 'long_term.lookup("relationships")',
+  tone: 'violet',
+  msg: `2 prior partners · 1 new vendor · negotiation patterns retrieved`
+}];
+const buildStrategyLogs = s => {
+  const targetPrice = Math.round(s.lastPrice * s.targetIndex / 100);
+  const floorPrice = Math.round(s.lastPrice * s.floorIndex / 100);
+  return [{
+    phase: 'strategy',
+    agent: 'Negotiator',
+    sub: 'strategy_planner.anchor_analysis()',
+    tone: 'emerald',
+    msg: `market anchor analysis → benchmark band <b>${formatINR(floorPrice)}–${formatINR(targetPrice)}</b>/${s.unitShort} achievable in 3–4 rounds`
+  }, {
+    phase: 'strategy',
+    agent: 'Negotiator',
+    sub: 'strategy_planner.set_target()',
+    tone: 'emerald',
+    msg: `target = <b>${formatINR(targetPrice)}</b>/${s.unitShort} · floor = <b>${formatINR(floorPrice)}</b>/${s.unitShort} · BATNA = spot market`
+  }, {
+    phase: 'strategy',
+    agent: 'Knowledge',
+    sub: 'rag.category_playbook.fetch()',
+    tone: 'amber',
+    msg: `loaded play <b>"multi-round ${s.categoryCode}"</b> · 4-round protocol · concession step ≤ 3%`
+  }, {
+    phase: 'strategy',
+    agent: 'Memory',
+    sub: 'long_term.fetch("negotiation_patterns")',
+    tone: 'violet',
+    msg: `historical: this category typically yields <b>8–12%</b> across 3 rounds · drop-out risk ${s.id === 'pantry' ? 'high' : 'low'}`
+  }, {
+    phase: 'strategy',
+    agent: 'Negotiator',
+    sub: 'outreach_bot.dispatch_rfq()',
+    tone: 'emerald',
+    msg: `RFQ packets sent to 3 finalists · template <b>T-RFQ-08</b> · response window 2hr`
+  }];
+};
+const buildGovernanceLogs = (s, totals) => {
+  const base = [{
+    phase: 'governance',
+    agent: 'Governance',
+    sub: 'policy_engine.evaluate()',
+    tone: 'amber',
+    msg: `deal envelope <b>${formatINR(totals.finalTotal)}</b> checked against <b>P-04.2 tier table</b>`
+  }, {
+    phase: 'governance',
+    agent: 'Governance',
+    sub: 'policy_engine.classify()',
+    tone: 'amber',
+    msg: `tier = <b>${totals.tier === 'material' ? 'Material Order' : 'Standard Order'}</b> · ${totals.requiresHuman ? `${formatINR(totals.finalTotal - POLICY_THRESHOLD)} above ${formatINR(POLICY_THRESHOLD)} cutoff · human approval required` : `within ${formatINR(POLICY_THRESHOLD)} cutoff · auto-approve eligible`}`
+  }, {
+    phase: 'governance',
+    agent: 'Governance',
+    sub: 'risk_scorer.compute()',
+    tone: 'amber',
+    msg: `risk score <b>2.1 / 10</b> (low) · vendor track record + ESG + MSME all green`
+  }, {
+    phase: 'governance',
+    agent: 'Governance',
+    sub: 'compliance_gatekeeper.verify()',
+    tone: 'amber',
+    msg: `winning vendor re-verified · GST ✓ · MSME ${totals.winner.msme ? '✓' : '—'} · ESG ${totals.winner.esg}`
+  }];
+  if (totals.requiresHuman) {
+    base.push({
+      phase: 'governance',
+      agent: 'Governance',
+      sub: 'approval_router.route()',
+      tone: 'amber',
+      msg: `routed to <b>priya.sharma@coca-cola.in</b> (Cat-Mgr Maharashtra) · SLA 24h`
+    });
+  } else {
+    base.push({
+      phase: 'governance',
+      agent: 'Governance',
+      sub: 'approval_router.auto_approve()',
+      tone: 'emerald',
+      msg: `auto-approve issued · no human intervention needed`
+    });
+  }
+  return base;
+};
+const buildClosureLogs = (s, totals) => [{
+  phase: 'closure',
+  agent: 'Closer',
+  sub: 'po_generator.draft()',
+  tone: 'rose',
+  msg: `PO drafted from template <b>TPL-12-A</b> · digitally signed · attachments: contract, SLA, ESG cert`
+}, {
+  phase: 'closure',
+  agent: 'Closer',
+  sub: 'email_dispatcher.notify_vendor()',
+  tone: 'rose',
+  msg: `<b>${totals.winner.name}</b> notified · acknowledgement expected within 12hr`
+}, {
+  phase: 'closure',
+  agent: 'Closer',
+  sub: 'audit_writer.seal()',
+  tone: 'rose',
+  msg: `immutable audit record sealed · session=<b>mer-${4912 + s.id.length}</b> · <b>SOX-ready</b>`
+}, {
+  phase: 'closure',
+  agent: 'Closer',
+  sub: 'audit_writer.close()',
+  tone: 'rose',
+  msg: `session closed · events recorded across <b>6 phases</b> · ready for review`
+}];
 
+/* ============================================================
+   ICONS
+   ============================================================ */
 const Icon = ({
   name,
   className = 'w-5 h-5'
@@ -421,14 +746,6 @@ const Icon = ({
       return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
         d: "M12 20h9M16.5 3.5a2.12 2.12 0 113 3L7 19l-4 1 1-4 12.5-12.5z"
       }));
-    case 'logo':
-      return /*#__PURE__*/React.createElement("svg", {
-        ...common,
-        viewBox: "0 0 24 24",
-        strokeWidth: "2"
-      }, /*#__PURE__*/React.createElement("path", {
-        d: "M4 19V5l8 5 8-5v14"
-      }));
     case 'human':
       return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("circle", {
         cx: "12",
@@ -460,13 +777,6 @@ const Icon = ({
     case 'refresh':
       return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
         d: "M3 12a9 9 0 0115-6.7L21 8M21 3v5h-5M21 12a9 9 0 01-15 6.7L3 16M3 21v-5h5"
-      }));
-    case 'rupee':
-      return /*#__PURE__*/React.createElement("svg", {
-        ...common,
-        strokeWidth: "2"
-      }, /*#__PURE__*/React.createElement("path", {
-        d: "M6 3h12M6 8h12M6 13h7c2.8 0 5-2.2 5-5M9 13l9 8"
       }));
     case 'graph':
       return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
@@ -501,15 +811,54 @@ const Icon = ({
       return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
         d: "M4 22V4M4 4h13l-2 4 2 4H4"
       }));
+    case 'chevDown':
+      return /*#__PURE__*/React.createElement("svg", {
+        ...common,
+        strokeWidth: "2"
+      }, /*#__PURE__*/React.createElement("path", {
+        d: "M6 9l6 6 6-6"
+      }));
+    case 'chevRight':
+      return /*#__PURE__*/React.createElement("svg", {
+        ...common,
+        strokeWidth: "2"
+      }, /*#__PURE__*/React.createElement("path", {
+        d: "M9 6l6 6-6 6"
+      }));
+    case 'percent':
+      return /*#__PURE__*/React.createElement("svg", {
+        ...common,
+        strokeWidth: "2"
+      }, /*#__PURE__*/React.createElement("path", {
+        d: "M19 5L5 19"
+      }), /*#__PURE__*/React.createElement("circle", {
+        cx: "6.5",
+        cy: "6.5",
+        r: "2.5"
+      }), /*#__PURE__*/React.createElement("circle", {
+        cx: "17.5",
+        cy: "17.5",
+        r: "2.5"
+      }));
+    case 'layers':
+      return /*#__PURE__*/React.createElement("svg", common, /*#__PURE__*/React.createElement("path", {
+        d: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+      }));
+    case 'rupee':
+      return /*#__PURE__*/React.createElement("svg", {
+        ...common,
+        strokeWidth: "2"
+      }, /*#__PURE__*/React.createElement("path", {
+        d: "M6 3h12M6 8h12M6 13h7c2.8 0 5-2.2 5-5M9 13l9 8"
+      }));
     default:
       return null;
   }
 };
 
 /* ============================================================
-   APP — top-level state machine
+   APP — top-level state
    ============================================================ */
-
 const App = () => {
   const [screen, setScreen] = useState('intake');
   const [scenarioId, setScenarioId] = useState(null);
@@ -550,8 +899,7 @@ const App = () => {
     className: "min-h-screen flex flex-col"
   }, /*#__PURE__*/React.createElement(TopBar, {
     screen: screen,
-    scenario: scenario,
-    totals: totals
+    scenario: scenario
   }), /*#__PURE__*/React.createElement("main", {
     key: screen,
     "data-screen-root": true,
@@ -562,25 +910,29 @@ const App = () => {
     setCustomRequest: setCustomRequest
   }), screen === 'orchestration' && scenario && /*#__PURE__*/React.createElement(OrchestrationScreen, {
     scenario: scenario,
+    auditTrail: auditTrail,
     appendAudit: appendAudit,
-    onComplete: () => setScreen('negotiation')
+    onContinue: () => setScreen('negotiation')
   }), screen === 'negotiation' && scenario && /*#__PURE__*/React.createElement(NegotiationScreen, {
     scenario: scenario,
+    auditTrail: auditTrail,
     appendAudit: appendAudit,
-    onComplete: () => setScreen('governance')
+    onContinue: () => setScreen('governance')
   }), screen === 'governance' && scenario && /*#__PURE__*/React.createElement(GovernanceScreen, {
     scenario: scenario,
     totals: totals,
+    auditTrail: auditTrail,
     appendAudit: appendAudit,
     decision: governanceDecision,
     setDecision: setGovernanceDecision,
-    onComplete: () => setScreen('outcome')
+    onContinue: () => setScreen('outcome')
   }), screen === 'outcome' && scenario && /*#__PURE__*/React.createElement(OutcomeScreen, {
     scenario: scenario,
     totals: totals,
     auditTrail: auditTrail,
     decision: governanceDecision,
-    onReset: resetAll
+    onReset: resetAll,
+    appendAudit: appendAudit
   })), /*#__PURE__*/React.createElement("footer", {
     className: "py-6 px-6 text-center text-[11px] text-slate-400 border-t border-slate-200/60 bg-white/40"
   }, /*#__PURE__*/React.createElement("span", {
@@ -591,13 +943,11 @@ const App = () => {
 };
 
 /* ============================================================
-   TOP BAR + STEP INDICATOR
+   TOP BAR
    ============================================================ */
-
 const TopBar = ({
   screen,
-  scenario,
-  totals
+  scenario
 }) => {
   const activeIdx = STEPS.findIndex(s => s.key === screen);
   return /*#__PURE__*/React.createElement("header", {
@@ -638,7 +988,7 @@ const TopBar = ({
     className: "hidden md:flex items-center gap-2 text-[11px] text-slate-500"
   }, /*#__PURE__*/React.createElement("span", {
     className: "font-mono"
-  }, "REQ-", scenario.id.toUpperCase().slice(0, 4), "-", String(Math.floor(scenario.quantity * scenario.lastPrice % 10000)).padStart(4, '0'))), /*#__PURE__*/React.createElement("div", {
+  }, "REQ-", scenario.id.toUpperCase().slice(0, 4), "-", String(Math.floor(scenario.quantity * 137 % 10000)).padStart(4, '0'))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-soft"
@@ -648,9 +998,8 @@ const TopBar = ({
 };
 
 /* ============================================================
-   SCREEN 1 — INTAKE
+   INTAKE
    ============================================================ */
-
 const IntakeScreen = ({
   onSubmit,
   customRequest,
@@ -669,7 +1018,6 @@ const IntakeScreen = ({
   }, [customRequest]);
   const handleSubmit = () => {
     if (matchedId) return onSubmit(matchedId);
-    if (customRequest.trim()) return onSubmit('cartridges');
     onSubmit('cartridges');
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -684,7 +1032,7 @@ const IntakeScreen = ({
     className: "text-slate-500"
   }, "AGENT ONLINE"), /*#__PURE__*/React.createElement("span", {
     className: "text-slate-300"
-  }, "·"), /*#__PURE__*/React.createElement("span", null, "3 negotiations completed today · ₹68,400 saved")), /*#__PURE__*/React.createElement("h1", {
+  }, "·"), /*#__PURE__*/React.createElement("span", null, "ready to take a request")), /*#__PURE__*/React.createElement("h1", {
     className: "text-[44px] md:text-5xl font-bold tracking-tight text-slate-900 mb-4 leading-tight"
   }, "What do you ", /*#__PURE__*/React.createElement("span", {
     className: "gradient-text"
@@ -762,25 +1110,26 @@ const IntakeScreen = ({
     name: "arrow",
     className: "w-4 h-4"
   })))))), /*#__PURE__*/React.createElement("div", {
-    className: "max-w-3xl mx-auto mt-12 grid grid-cols-3 gap-4 fade-in",
+    className: "max-w-3xl mx-auto mt-12 grid grid-cols-2 md:grid-cols-4 gap-3 fade-in",
     style: {
       animationDelay: '440ms'
     }
-  }, /*#__PURE__*/React.createElement(StatPill, {
+  }, /*#__PURE__*/React.createElement(CapabilityPill, {
+    icon: "search",
+    label: "Vendor discovery",
+    sub: "247-vendor network · enriched"
+  }), /*#__PURE__*/React.createElement(CapabilityPill, {
     icon: "graph",
-    label: "Avg savings",
-    value: "11.4%",
-    sub: "across last 90 days"
-  }), /*#__PURE__*/React.createElement(StatPill, {
-    icon: "bolt",
-    label: "Touchless rate",
-    value: "78%",
-    sub: "auto-approved deals"
-  }), /*#__PURE__*/React.createElement(StatPill, {
+    label: "Multi-round negotiation",
+    sub: "strategy · counter-offers · floor"
+  }), /*#__PURE__*/React.createElement(CapabilityPill, {
     icon: "shield",
-    label: "Compliance",
-    value: "100%",
-    sub: "policy adherence"
+    label: "Policy gating",
+    sub: "tier classification · risk score"
+  }), /*#__PURE__*/React.createElement(CapabilityPill, {
+    icon: "doc",
+    label: "Full audit trail",
+    sub: "immutable · SOX-ready"
   })), /*#__PURE__*/React.createElement("div", {
     className: "text-center mt-10 text-[12px] text-slate-400 fade-in",
     style: {
@@ -809,303 +1158,28 @@ const StatPill = ({
 }, value), /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] text-slate-400"
 }, sub)));
-
-/* ============================================================
-   AGENT CONSOLE — used in orchestration + negotiation
-   ============================================================ */
-
-const TONE_BG = {
-  blue: 'bg-blue-500/15 text-blue-300 border-blue-500/20',
-  violet: 'bg-violet-500/15 text-violet-300 border-violet-500/20',
-  amber: 'bg-amber-500/15 text-amber-300 border-amber-500/20',
-  teal: 'bg-teal-500/15 text-teal-300 border-teal-500/20',
-  emerald: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20',
-  rose: 'bg-rose-500/15 text-rose-300 border-rose-500/20',
-  slate: 'bg-slate-500/15 text-slate-300 border-slate-500/20'
-};
-const AgentConsole = ({
-  logs,
-  streaming,
-  title = 'merlin · supervisor.log',
-  maxHeight = 'max-h-[540px]'
-}) => {
-  const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [logs.length]);
-  return /*#__PURE__*/React.createElement("div", {
-    className: "rounded-2xl bg-slate-900 border border-slate-800/80 shadow-xl shadow-slate-900/10 overflow-hidden"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-2 px-4 py-2.5 bg-slate-950/70 border-b border-slate-800/80"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-1.5"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 rounded-full bg-rose-400/70"
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 rounded-full bg-amber-400/70"
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 rounded-full bg-emerald-400/70"
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "text-[11px] text-slate-400 font-mono ml-2 tracking-tight"
-  }, title), /*#__PURE__*/React.createElement("div", {
-    className: "ml-auto flex items-center gap-1.5"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: `w-1.5 h-1.5 rounded-full ${streaming ? 'bg-emerald-400 pulse-soft' : 'bg-slate-500'}`
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "text-[10px] text-slate-500 font-mono uppercase tracking-wider"
-  }, streaming ? 'streaming' : 'idle'))), /*#__PURE__*/React.createElement("div", {
-    ref: ref,
-    className: `font-mono text-[12.5px] leading-[1.65] p-4 ${maxHeight} overflow-y-auto scroll-fade`
-  }, logs.length === 0 && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-500"
-  }, "awaiting first event", /*#__PURE__*/React.createElement("span", {
-    className: "blink"
-  }, "_")), logs.map((l, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    className: "fade-in mb-1.5 flex items-start gap-2.5"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-600 shrink-0 select-none"
-  }, String(i + 1).padStart(2, '0')), /*#__PURE__*/React.createElement("span", {
-    className: `shrink-0 px-1.5 py-[1px] rounded text-[9.5px] font-semibold uppercase tracking-wider border ${TONE_BG[l.tone] || TONE_BG.slate}`
-  }, l.agent), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-300 break-words",
-    dangerouslySetInnerHTML: {
-      __html: l.msg
-    }
-  }))), streaming && logs.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-500 mt-1"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "blink"
-  }, "▌"))));
-};
-const ConsoleCollapsed = ({
-  count
-}) => /*#__PURE__*/React.createElement("div", {
-  className: "rounded-2xl bg-white border border-slate-200 shadow-sm p-6 text-center"
-}, /*#__PURE__*/React.createElement("div", {
-  className: "w-12 h-12 mx-auto rounded-full gradient-bg-soft flex items-center justify-center text-blue-600 mb-3"
-}, /*#__PURE__*/React.createElement(Icon, {
-  name: "eyeOff",
-  className: "w-5 h-5"
-})), /*#__PURE__*/React.createElement("div", {
-  className: "text-[14px] font-semibold text-slate-900"
-}, "Agent activity hidden"), /*#__PURE__*/React.createElement("div", {
-  className: "text-[12.5px] text-slate-500 mt-1"
-}, count, " agent events processed · toggle on to inspect"));
-
-/* ============================================================
-   SCREEN 2 — ORCHESTRATION
-   ============================================================ */
-
-const buildOrchestrationLogs = s => [{
-  agent: 'Supervisor',
-  tone: 'blue',
-  msg: `Request received → <span class="text-slate-100">"${s.requestText}"</span>`
-}, {
-  agent: 'Supervisor',
-  tone: 'blue',
-  msg: `Classified intent → <span class="text-blue-300">TAIL_SPEND_PROCUREMENT</span> · category="${s.category}" · region=${s.region}`
-}, {
-  agent: 'Supervisor',
-  tone: 'blue',
-  msg: `Delegating to <span class="text-emerald-300">Negotiator Agent</span> with constraint: target ${formatINR(s.targetPrice)}/${s.unitShort}`
-}, {
-  agent: 'Memory',
-  tone: 'violet',
-  msg: `<span class="text-slate-500">purchase_history.fetch()</span> → last order from <span class="text-slate-100">"${s.lastVendor}"</span> at ${formatINR(s.lastPrice)}/${s.unitShort} · 4 prior orders, 9.2% avg savings`
-}, {
-  agent: 'Memory',
-  tone: 'violet',
-  msg: `<span class="text-slate-500">vendor_relationships.fetch()</span> → 3 preferred vendors loaded with SLA history`
-}, {
-  agent: 'Knowledge',
-  tone: 'amber',
-  msg: `<span class="text-slate-500">rag.lookup("policy/auto_approve")</span> → threshold = <span class="text-amber-200">${formatINR(POLICY_THRESHOLD)}</span> · doc P-04.2 §3.1`
-}, {
-  agent: 'Knowledge',
-  tone: 'amber',
-  msg: `<span class="text-slate-500">rag.lookup("category_playbook")</span> → benchmark band ${formatINR(s.targetPrice)}–${formatINR(s.lastPrice)} per ${s.unitShort}`
-}, {
-  agent: 'Tools',
-  tone: 'teal',
-  msg: `<span class="text-slate-500">vendor_search(category, region)</span> → 3 eligible vendors returned`
-}, {
-  agent: 'Tools',
-  tone: 'teal',
-  msg: `<span class="text-slate-500">compliance_check(vendors=3)</span> → all approved · <span class="text-emerald-300">MSME ✓ GST ✓ ESG ✓</span>`
-}, {
-  agent: 'Negotiator',
-  tone: 'emerald',
-  msg: `Strategy set · 3–4 rounds, target ${formatINR(s.targetPrice)}/${s.unitShort} · beginning outreach`
-}];
-const OrchestrationScreen = ({
-  scenario,
-  appendAudit,
-  onComplete
-}) => {
-  const logs = useMemo(() => buildOrchestrationLogs(scenario), [scenario]);
-  const [visible, setVisible] = useState(0);
-  const [showConsole, setShowConsole] = useState(true);
-  const [done, setDone] = useState(false);
-  useEffect(() => {
-    let i = 0;
-    const id = setInterval(() => {
-      i += 1;
-      setVisible(i);
-      appendAudit({
-        agent: logs[i - 1].agent,
-        tone: logs[i - 1].tone,
-        message: logs[i - 1].msg,
-        phase: 'orchestration'
-      });
-      if (i >= logs.length) {
-        clearInterval(id);
-        setTimeout(() => {
-          setDone(true);
-          onComplete();
-        }, 1100);
-      }
-    }, 620);
-    return () => clearInterval(id);
-  }, []);
-  const progressSteps = [{
-    label: 'Understanding request',
-    threshold: 3
-  }, {
-    label: 'Loading purchase history',
-    threshold: 5
-  }, {
-    label: 'Checking policy & playbook',
-    threshold: 7
-  }, {
-    label: 'Finding eligible vendors',
-    threshold: 9
-  }, {
-    label: 'Briefing negotiator agent',
-    threshold: 10
-  }];
-  return /*#__PURE__*/React.createElement("div", {
-    className: "max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[1fr_1.05fr] gap-6"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "space-y-5"
-  }, /*#__PURE__*/React.createElement(RequestSummary, {
-    scenario: scenario
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl border border-slate-200 shadow-sm p-6"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-3 mb-5"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "w-11 h-11 rounded-xl gradient-bg flex items-center justify-center text-white shadow-sm shadow-blue-500/20"
-  }, done ? /*#__PURE__*/React.createElement(Icon, {
-    name: "check",
-    className: "w-5 h-5"
-  }) : /*#__PURE__*/React.createElement("div", {
-    className: "w-5 h-5 rounded-full border-[2.5px] border-white/40 border-t-white animate-spin"
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 min-w-0"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[15px] font-semibold text-slate-900 leading-tight"
-  }, done ? 'Briefing complete · handing off to negotiator' : 'Finding and negotiating with vendors for you…'), /*#__PURE__*/React.createElement("div", {
-    className: "text-[12px] text-slate-500 mt-0.5"
-  }, "Typical turnaround 3–6 minutes · you don't need to wait"))), /*#__PURE__*/React.createElement("ul", {
-    className: "space-y-3"
-  }, progressSteps.map((s, i) => {
-    const isDone = visible >= s.threshold;
-    const isActive = !isDone && visible >= (progressSteps[i - 1]?.threshold ?? 0);
-    return /*#__PURE__*/React.createElement("li", {
-      key: i,
-      className: "flex items-center gap-3"
-    }, /*#__PURE__*/React.createElement("span", {
-      className: `w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold transition-all ${isDone ? 'bg-emerald-500 text-white' : isActive ? 'gradient-bg text-white ring-pulse' : 'bg-slate-100 text-slate-400'}`
-    }, isDone ? /*#__PURE__*/React.createElement(Icon, {
-      name: "check",
-      className: "w-3 h-3"
-    }) : i + 1), /*#__PURE__*/React.createElement("span", {
-      className: `text-[13.5px] transition-colors ${isDone ? 'text-slate-900 font-medium' : isActive ? 'text-slate-700' : 'text-slate-400'}`
-    }, s.label), isActive && /*#__PURE__*/React.createElement("span", {
-      className: "ml-auto text-[10.5px] text-blue-600 font-medium tracking-wide uppercase shimmer px-2 py-0.5 rounded"
-    }, "working"), isDone && /*#__PURE__*/React.createElement("span", {
-      className: "ml-auto text-[10.5px] text-emerald-600 font-medium tracking-wide uppercase"
-    }, "done"));
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "bg-gradient-to-br from-blue-50/60 to-teal-50/60 border border-blue-100/60 rounded-2xl p-5 flex items-start gap-3"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "w-8 h-8 rounded-lg bg-white shadow-sm flex items-center justify-center text-blue-600 shrink-0"
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "sparkles",
-    className: "w-4 h-4"
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "text-[13px] text-slate-700 leading-relaxed"
-  }, /*#__PURE__*/React.createElement("strong", {
-    className: "text-slate-900"
-  }, "Why touchless?"), " Tail spend is ~80% of suppliers but only ~20% of value. Each request would cost ~3 person-hours manually. Merlin closes the loop in minutes, with a full audit trail."))), /*#__PURE__*/React.createElement("div", {
-    className: "lg:sticky lg:top-[76px] h-fit"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between mb-3"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-2"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[10.5px] uppercase tracking-[0.15em] font-semibold text-slate-500"
-  }, "Agent activity · live"), /*#__PURE__*/React.createElement("span", {
-    className: "inline-flex items-center gap-1 text-[10px] font-mono text-slate-400"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-1 h-1 rounded-full bg-emerald-500 pulse-soft"
-  }), visible, "/", logs.length)), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowConsole(!showConsole),
-    className: `flex items-center gap-1.5 text-[11.5px] font-medium px-3 py-1.5 rounded-full transition-all ${showConsole ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: showConsole ? 'eye' : 'eyeOff',
-    className: "w-3.5 h-3.5"
-  }), showConsole ? 'Hide agent activity' : 'Show agent activity')), showConsole ? /*#__PURE__*/React.createElement(AgentConsole, {
-    logs: logs.slice(0, visible),
-    streaming: !done
-  }) : /*#__PURE__*/React.createElement(ConsoleCollapsed, {
-    count: visible
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "mt-3 grid grid-cols-4 gap-2"
-  }, /*#__PURE__*/React.createElement(ArchPill, {
-    icon: "human",
-    label: "Supervisor",
-    tone: "blue",
-    active: visible >= 1
-  }), /*#__PURE__*/React.createElement(ArchPill, {
-    icon: "database",
-    label: "Memory",
-    tone: "violet",
-    active: visible >= 4
-  }), /*#__PURE__*/React.createElement(ArchPill, {
-    icon: "book",
-    label: "Knowledge",
-    tone: "amber",
-    active: visible >= 6
-  }), /*#__PURE__*/React.createElement(ArchPill, {
-    icon: "tool",
-    label: "Tools",
-    tone: "teal",
-    active: visible >= 8
-  }))));
-};
-const ArchPill = ({
+const CapabilityPill = ({
   icon,
   label,
-  tone,
-  active
-}) => {
-  const tones = {
-    blue: active ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-400 border-slate-200',
-    violet: active ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-white text-slate-400 border-slate-200',
-    amber: active ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-400 border-slate-200',
-    teal: active ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-white text-slate-400 border-slate-200'
-  };
-  return /*#__PURE__*/React.createElement("div", {
-    className: `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${tones[tone]}`
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: icon,
-    className: "w-3.5 h-3.5"
-  }), /*#__PURE__*/React.createElement("span", null, label), active && /*#__PURE__*/React.createElement("span", {
-    className: "ml-auto w-1.5 h-1.5 rounded-full bg-current pulse-soft"
-  }));
-};
+  sub
+}) => /*#__PURE__*/React.createElement("div", {
+  className: "bg-white rounded-xl border border-slate-200 px-4 py-3.5 shadow-sm"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2 mb-1.5"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "w-7 h-7 rounded-lg gradient-bg-soft flex items-center justify-center text-blue-600 shrink-0"
+}, /*#__PURE__*/React.createElement(Icon, {
+  name: icon,
+  className: "w-4 h-4"
+})), /*#__PURE__*/React.createElement("div", {
+  className: "text-[12px] font-semibold text-slate-900 leading-tight"
+}, label)), /*#__PURE__*/React.createElement("div", {
+  className: "text-[10.5px] text-slate-500 leading-snug"
+}, sub));
+
+/* ============================================================
+   REQUEST SUMMARY
+   ============================================================ */
 const RequestSummary = ({
   scenario
 }) => /*#__PURE__*/React.createElement("div", {
@@ -1134,174 +1208,615 @@ const RequestSummary = ({
 }, /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] uppercase tracking-wider text-slate-400 font-semibold"
 }, "Baseline"), /*#__PURE__*/React.createElement("div", {
-  className: "text-[15px] font-bold text-slate-900 num-tab"
+  className: "text-[18px] font-bold text-slate-900 num-tab"
 }, formatINR(scenario.lastPrice * scenario.quantity)), /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] text-slate-400"
 }, "@ ", formatINR(scenario.lastPrice), "/", scenario.unitShort)));
 
 /* ============================================================
-   SCREEN 3 — NEGOTIATION THEATER
+   SECTIONED CONSOLE — bifurcated by phase
    ============================================================ */
+const TONE_BG = {
+  blue: 'bg-blue-500/15 text-blue-300 border-blue-500/25',
+  violet: 'bg-violet-500/15 text-violet-300 border-violet-500/25',
+  amber: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
+  teal: 'bg-teal-500/15 text-teal-300 border-teal-500/25',
+  emerald: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25',
+  rose: 'bg-rose-500/15 text-rose-300 border-rose-500/25',
+  slate: 'bg-slate-500/15 text-slate-300 border-slate-500/25'
+};
+const TONE_TEXT = {
+  blue: 'text-blue-300',
+  violet: 'text-violet-300',
+  amber: 'text-amber-300',
+  teal: 'text-teal-300',
+  emerald: 'text-emerald-300',
+  rose: 'text-rose-300',
+  slate: 'text-slate-300'
+};
+const TONE_DOT = {
+  blue: 'bg-blue-400',
+  violet: 'bg-violet-400',
+  amber: 'bg-amber-400',
+  teal: 'bg-teal-400',
+  emerald: 'bg-emerald-400',
+  rose: 'bg-rose-400',
+  slate: 'bg-slate-400'
+};
+const SectionedConsole = ({
+  logs,
+  activePhaseId,
+  streaming,
+  title = 'merlin · agent.activity.log',
+  maxHeight = 'max-h-[640px]',
+  defaultCollapsed = false
+}) => {
+  const grouped = useMemo(() => {
+    const g = {};
+    PHASES.forEach(p => g[p.id] = []);
+    logs.forEach(l => {
+      if (g[l.phase]) g[l.phase].push(l);
+    });
+    return g;
+  }, [logs]);
+  const [collapsed, setCollapsed] = useState(() => {
+    const init = {};
+    PHASES.forEach(p => {
+      init[p.id] = defaultCollapsed;
+    });
+    return init;
+  });
+  const scrollRef = useRef(null);
+  useEffect(() => {
+    if (scrollRef.current && streaming) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [logs.length, streaming]);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl bg-slate-900 border border-slate-800/80 shadow-xl shadow-slate-900/10 overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 px-4 py-2.5 bg-slate-950/70 border-b border-slate-800/80"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-1.5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "w-2.5 h-2.5 rounded-full bg-rose-400/70"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "w-2.5 h-2.5 rounded-full bg-amber-400/70"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "w-2.5 h-2.5 rounded-full bg-emerald-400/70"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-slate-400 font-mono ml-2 tracking-tight"
+  }, title), /*#__PURE__*/React.createElement("div", {
+    className: "ml-auto flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] text-slate-500 font-mono"
+  }, logs.length, " events · ", Object.values(grouped).filter(g => g.length).length, "/6 phases"), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: `w-1.5 h-1.5 rounded-full ${streaming ? 'bg-emerald-400 pulse-soft' : 'bg-slate-500'}`
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] text-slate-500 font-mono uppercase tracking-wider"
+  }, streaming ? 'streaming' : 'idle')))), /*#__PURE__*/React.createElement("div", {
+    ref: scrollRef,
+    className: `p-3 ${maxHeight} overflow-y-auto scroll-fade`
+  }, PHASES.map((phase, idx) => {
+    const entries = grouped[phase.id];
+    const hasEntries = entries.length > 0;
+    const isActive = activePhaseId === phase.id;
+    const status = !hasEntries && !isActive ? 'pending' : isActive && streaming ? 'active' : 'done';
+    return /*#__PURE__*/React.createElement(PhaseSection, {
+      key: phase.id,
+      phase: phase,
+      index: idx,
+      entries: entries,
+      status: status,
+      collapsed: collapsed[phase.id],
+      onToggle: () => setCollapsed(c => ({
+        ...c,
+        [phase.id]: !c[phase.id]
+      })),
+      streaming: isActive && streaming
+    });
+  })));
+};
+const PhaseSection = ({
+  phase,
+  index,
+  entries,
+  status,
+  collapsed,
+  onToggle,
+  streaming
+}) => {
+  const statusLabel = status === 'done' ? `${entries.length} events` : status === 'active' ? `${entries.length} events · live` : 'pending';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "mb-2 last:mb-0"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: onToggle,
+    className: `w-full flex items-center gap-2 px-2 py-2 rounded-md transition-colors text-left ${status === 'pending' ? 'opacity-50' : 'hover:bg-slate-800/40'}`
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: collapsed ? 'chevRight' : 'chevDown',
+    className: "w-3 h-3 text-slate-500 shrink-0"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: `w-5 h-5 rounded flex items-center justify-center shrink-0 ${status === 'done' ? 'bg-emerald-500/20 text-emerald-300' : status === 'active' ? `bg-${phase.tone}-500/20 ${TONE_TEXT[phase.tone]}` : 'bg-slate-700/40 text-slate-500'}`
+  }, status === 'done' ? /*#__PURE__*/React.createElement(Icon, {
+    name: "check",
+    className: "w-3 h-3"
+  }) : /*#__PURE__*/React.createElement(Icon, {
+    name: phase.icon,
+    className: "w-3 h-3"
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "font-mono text-[10px] text-slate-500 shrink-0"
+  }, "P", index + 1), /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold text-[11.5px] uppercase tracking-wider text-slate-200"
+  }, phase.label), /*#__PURE__*/React.createElement("span", {
+    className: "ml-auto flex items-center gap-1.5 text-[10px] font-mono text-slate-500 shrink-0"
+  }, status === 'active' && /*#__PURE__*/React.createElement("span", {
+    className: `w-1.5 h-1.5 rounded-full ${TONE_DOT[phase.tone]} pulse-soft`
+  }), statusLabel)), !collapsed && /*#__PURE__*/React.createElement("div", {
+    className: "ml-3 pl-4 border-l border-slate-800 mt-0.5 pb-1 space-y-2"
+  }, entries.length === 0 && status === 'pending' && /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-slate-600 font-mono italic py-1"
+  }, "awaiting agent dispatch…"), entries.length === 0 && status === 'active' && /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-slate-500 font-mono py-1"
+  }, "initializing", /*#__PURE__*/React.createElement("span", {
+    className: "blink"
+  }, "_")), entries.map((e, i) => /*#__PURE__*/React.createElement(LogEntry, {
+    key: i,
+    index: i + 1,
+    entry: e
+  })), streaming && entries.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "text-slate-600 font-mono text-[11px]"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "blink"
+  }, "▌"))));
+};
+const LogEntry = ({
+  index,
+  entry
+}) => /*#__PURE__*/React.createElement("div", {
+  className: "fade-in"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "flex items-baseline gap-2"
+}, /*#__PURE__*/React.createElement("span", {
+  className: "text-slate-700 font-mono text-[10px] w-5 shrink-0 text-right"
+}, String(index).padStart(2, '0')), /*#__PURE__*/React.createElement("span", {
+  className: `px-1.5 py-[1px] rounded text-[9.5px] font-semibold uppercase tracking-wider border shrink-0 ${TONE_BG[entry.tone]}`
+}, entry.agent), /*#__PURE__*/React.createElement("span", {
+  className: "font-mono text-[11px] text-slate-400 truncate"
+}, entry.sub)), /*#__PURE__*/React.createElement("div", {
+  className: "ml-7 mt-0.5 text-[12.5px] text-slate-300 leading-relaxed font-mono",
+  dangerouslySetInnerHTML: {
+    __html: entry.msg.replace(/<b>/g, '<b class="text-slate-100 font-semibold">')
+  }
+}));
+const ConsoleCollapsed = ({
+  count
+}) => /*#__PURE__*/React.createElement("div", {
+  className: "rounded-2xl bg-white border border-slate-200 shadow-sm p-6 text-center"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "w-12 h-12 mx-auto rounded-full gradient-bg-soft flex items-center justify-center text-blue-600 mb-3"
+}, /*#__PURE__*/React.createElement(Icon, {
+  name: "eyeOff",
+  className: "w-5 h-5"
+})), /*#__PURE__*/React.createElement("div", {
+  className: "text-[14px] font-semibold text-slate-900"
+}, "Agent activity hidden"), /*#__PURE__*/React.createElement("div", {
+  className: "text-[12.5px] text-slate-500 mt-1"
+}, count, " agent events processed · toggle on to inspect"));
 
+/* ============================================================
+   CONTINUE BAR — bottom CTA replacing auto-advance
+   ============================================================ */
+const ContinueBar = ({
+  enabled,
+  label,
+  sub,
+  onClick,
+  secondary
+}) => /*#__PURE__*/React.createElement("div", {
+  className: "sticky bottom-0 z-30 -mx-6 px-6 pt-3 pb-4 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "max-w-7xl mx-auto flex items-center justify-between gap-4 bg-white rounded-2xl border border-slate-200 shadow-md px-5 py-3.5"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-3 min-w-0"
+}, /*#__PURE__*/React.createElement("div", {
+  className: `w-2 h-2 rounded-full shrink-0 ${enabled ? 'bg-emerald-500' : 'bg-amber-400 pulse-soft'}`
+}), /*#__PURE__*/React.createElement("div", {
+  className: "min-w-0"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "text-[13px] font-semibold text-slate-900 truncate"
+}, enabled ? 'Stage complete · ready when you are' : 'Agents working…'), sub && /*#__PURE__*/React.createElement("div", {
+  className: "text-[11.5px] text-slate-500 truncate"
+}, sub))), /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2 shrink-0"
+}, secondary, /*#__PURE__*/React.createElement("button", {
+  onClick: enabled ? onClick : undefined,
+  disabled: !enabled,
+  className: `px-5 py-2.5 rounded-xl text-[13px] font-semibold flex items-center gap-2 transition-all ${enabled ? 'gradient-bg text-white shadow-sm hover:shadow-lg hover:shadow-blue-500/20' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`
+}, label, " ", /*#__PURE__*/React.createElement(Icon, {
+  name: "arrow",
+  className: "w-4 h-4"
+})))));
+
+/* ============================================================
+   SCREEN 2 — ORCHESTRATION (planning + listing)
+   ============================================================ */
+const ArchPill = ({
+  icon,
+  label,
+  tone,
+  active
+}) => {
+  const tones = {
+    blue: active ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-400 border-slate-200',
+    violet: active ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-white text-slate-400 border-slate-200',
+    amber: active ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-400 border-slate-200',
+    teal: active ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-white text-slate-400 border-slate-200',
+    emerald: active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-400 border-slate-200',
+    rose: active ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-white text-slate-400 border-slate-200'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${tones[tone]}`
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: icon,
+    className: "w-3.5 h-3.5"
+  }), /*#__PURE__*/React.createElement("span", null, label), active && /*#__PURE__*/React.createElement("span", {
+    className: "ml-auto w-1.5 h-1.5 rounded-full bg-current pulse-soft"
+  }));
+};
+const OrchestrationScreen = ({
+  scenario,
+  auditTrail,
+  appendAudit,
+  onContinue
+}) => {
+  const logs = useMemo(() => [...buildPlanningLogs(scenario), ...buildListingLogs(scenario)], [scenario]);
+  const [visible, setVisible] = useState(0);
+  const [showConsole, setShowConsole] = useState(true);
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setVisible(i);
+      appendAudit(logs[i - 1]);
+      if (i >= logs.length) {
+        clearInterval(id);
+        setDone(true);
+      }
+    }, 520);
+    return () => clearInterval(id);
+  }, []);
+  const planningCount = buildPlanningLogs(scenario).length;
+  const activePhaseId = visible <= planningCount ? 'planning' : 'listing';
+  const phaseLogsForConsole = auditTrail.slice(0); // entire trail so far
+
+  return /*#__PURE__*/React.createElement("div", {
+    className: "max-w-7xl mx-auto px-6 py-8"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-[1fr_1.12fr] gap-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "space-y-5"
+  }, /*#__PURE__*/React.createElement(RequestSummary, {
+    scenario: scenario
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl border border-slate-200 shadow-sm p-6"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3 mb-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-11 h-11 rounded-xl gradient-bg flex items-center justify-center text-white shadow-sm shadow-blue-500/20"
+  }, done ? /*#__PURE__*/React.createElement(Icon, {
+    name: "check",
+    className: "w-5 h-5"
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "w-5 h-5 rounded-full border-[2.5px] border-white/40 border-t-white animate-spin"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[15px] font-semibold text-slate-900 leading-tight"
+  }, done ? 'Orchestration complete · ready for negotiation' : 'Understanding your request & finding vendors…'), /*#__PURE__*/React.createElement("div", {
+    className: "text-[12px] text-slate-500 mt-0.5"
+  }, "Planning · Listing · Discovery"))), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement(ProgressGroup, {
+    title: "Intent & Planning",
+    tone: "blue",
+    steps: [{
+      label: 'Parse request & classify intent',
+      threshold: 2
+    }, {
+      label: 'Route to agent graph',
+      threshold: 3
+    }, {
+      label: 'Load session + 12-mo purchase memory',
+      threshold: 5
+    }, {
+      label: 'Retrieve relevant policies (RAG)',
+      threshold: 7
+    }],
+    visible: visible
+  }), /*#__PURE__*/React.createElement(ProgressGroup, {
+    title: "Listing & Discovery",
+    tone: "teal",
+    steps: [{
+      label: `Discover ${scenario.discovered} vendor candidates`,
+      threshold: 8
+    }, {
+      label: 'Enrich with credit · ESG · MSME data',
+      threshold: 11
+    }, {
+      label: 'Apply eligibility filters → 6 finalists',
+      threshold: 12
+    }, {
+      label: 'Rank by composite score → top 3 selected',
+      threshold: 14
+    }],
+    visible: visible
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "bg-gradient-to-br from-blue-50/60 to-teal-50/60 border border-blue-100/60 rounded-2xl p-5 flex items-start gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-8 h-8 rounded-lg bg-white shadow-sm flex items-center justify-center text-blue-600 shrink-0"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "sparkles",
+    className: "w-4 h-4"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "text-[13px] text-slate-700 leading-relaxed"
+  }, /*#__PURE__*/React.createElement("strong", {
+    className: "text-slate-900"
+  }, "Touchless by design."), " Listing alone replaces ~2 hours of manual sourcing per request — Merlin runs vendor discovery, credit/ESG/MSME checks, and ranking in parallel, then hands off a vetted top-3 to the negotiator."))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-3 sticky top-[68px] z-10 bg-slate-50 py-1"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10.5px] uppercase tracking-[0.15em] font-semibold text-slate-500"
+  }, "Agent activity · live"), /*#__PURE__*/React.createElement("span", {
+    className: "inline-flex items-center gap-1 text-[10px] font-mono text-slate-400"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "w-1 h-1 rounded-full bg-emerald-500 pulse-soft"
+  }), visible, "/", logs.length)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowConsole(!showConsole),
+    className: `flex items-center gap-1.5 text-[11.5px] font-medium px-3 py-1.5 rounded-full transition-all ${showConsole ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: showConsole ? 'eye' : 'eyeOff',
+    className: "w-3.5 h-3.5"
+  }), showConsole ? 'Hide agent activity' : 'Show agent activity')), showConsole ? /*#__PURE__*/React.createElement(SectionedConsole, {
+    logs: phaseLogsForConsole,
+    activePhaseId: activePhaseId,
+    streaming: !done
+  }) : /*#__PURE__*/React.createElement(ConsoleCollapsed, {
+    count: visible
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 grid grid-cols-4 gap-2"
+  }, /*#__PURE__*/React.createElement(ArchPill, {
+    icon: "human",
+    label: "Supervisor",
+    tone: "blue",
+    active: visible >= 1
+  }), /*#__PURE__*/React.createElement(ArchPill, {
+    icon: "database",
+    label: "Memory",
+    tone: "violet",
+    active: visible >= 4
+  }), /*#__PURE__*/React.createElement(ArchPill, {
+    icon: "book",
+    label: "Knowledge",
+    tone: "amber",
+    active: visible >= 7
+  }), /*#__PURE__*/React.createElement(ArchPill, {
+    icon: "search",
+    label: "Listing",
+    tone: "teal",
+    active: visible >= 8
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "mt-6"
+  }, /*#__PURE__*/React.createElement(ContinueBar, {
+    enabled: done,
+    onClick: onContinue,
+    label: "Continue to Negotiation Theater",
+    sub: done ? 'Top 3 vendors selected · negotiator briefed' : `${visible}/${logs.length} agent events streamed · please wait`
+  })));
+};
+const ProgressGroup = ({
+  title,
+  tone,
+  steps,
+  visible
+}) => {
+  const dotCls = {
+    blue: 'bg-blue-500',
+    teal: 'bg-teal-500',
+    violet: 'bg-violet-500',
+    emerald: 'bg-emerald-500',
+    amber: 'bg-amber-500'
+  }[tone];
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 mb-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: `w-1.5 h-1.5 rounded-full ${dotCls}`
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "text-[10.5px] uppercase tracking-[0.15em] font-semibold text-slate-500"
+  }, title)), /*#__PURE__*/React.createElement("ul", {
+    className: "space-y-2 pl-3.5 border-l border-slate-200"
+  }, steps.map((s, i) => {
+    const isDone = visible >= s.threshold;
+    const isActive = !isDone && visible >= (steps[i - 1]?.threshold ?? 0);
+    return /*#__PURE__*/React.createElement("li", {
+      key: i,
+      className: "flex items-center gap-2.5"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: `w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold -ml-[22px] border-2 border-slate-50 transition-all ${isDone ? 'bg-emerald-500 text-white' : isActive ? `${dotCls} text-white ring-pulse` : 'bg-slate-200 text-slate-400'}`
+    }, isDone ? /*#__PURE__*/React.createElement(Icon, {
+      name: "check",
+      className: "w-2 h-2"
+    }) : ''), /*#__PURE__*/React.createElement("span", {
+      className: `text-[13px] transition-colors ${isDone ? 'text-slate-900' : isActive ? 'text-slate-700' : 'text-slate-400'}`
+    }, s.label), isActive && /*#__PURE__*/React.createElement("span", {
+      className: "ml-auto text-[10px] text-blue-600 font-medium tracking-wide uppercase shimmer px-1.5 py-0.5 rounded"
+    }, "working"));
+  })));
+};
+
+/* ============================================================
+   SCREEN 3 — NEGOTIATION (strategy + rounds)
+   ============================================================ */
 const NegotiationScreen = ({
   scenario,
+  auditTrail,
   appendAudit,
-  onComplete
+  onContinue
 }) => {
+  const strategyLogs = useMemo(() => buildStrategyLogs(scenario), [scenario]);
   const numRounds = scenario.vendors[0].rounds.length;
-  const [roundIdx, setRoundIdx] = useState(0);
-  const [phase, setPhase] = useState('opening');
-  const [miniLogs, setMiniLogs] = useState([]);
+  const [phase, setPhase] = useState('strategy'); // 'strategy' | 'rounds' | 'settled'
+  const [strategyVisible, setStrategyVisible] = useState(0);
+  const [roundIdx, setRoundIdx] = useState(-1);
   const [showConsole, setShowConsole] = useState(true);
   useEffect(() => {
-    const pushLog = entry => {
-      setMiniLogs(prev => [...prev, entry]);
-      appendAudit({
-        ...entry,
-        message: entry.msg,
-        phase: 'negotiation'
-      });
-    };
-    const startEntries = [{
-      agent: 'Negotiator',
-      tone: 'emerald',
-      msg: `Opening outreach dispatched to <span class="text-slate-100">3 vendors</span> · target ${formatINR(scenario.targetPrice)}/${scenario.unitShort}`
-    }];
-    startEntries.forEach(e => pushLog(e));
-    const timeline = [];
-    let t = 800;
-    for (let r = 0; r < numRounds; r++) {
-      timeline.push({
-        at: t,
-        fn: () => {
-          setRoundIdx(r);
-          setPhase('negotiating');
-          pushLog({
-            agent: 'Negotiator',
-            tone: 'emerald',
-            msg: `<span class="text-slate-100">Round ${r + 1}</span> · counter-offers sent`
-          });
-        }
-      });
-      t += 600;
-      scenario.vendors.forEach((v, vi) => {
-        timeline.push({
-          at: t,
-          fn: () => {
-            const isAlreadyDropped = v.dropOutAfterRound != null && r > v.dropOutAfterRound + 1;
-            const justDropped = v.dropOutAfterRound != null && r === v.dropOutAfterRound + 1;
-            if (isAlreadyDropped) return;
-            if (justDropped) {
-              pushLog({
-                agent: 'Vendor',
-                tone: 'rose',
-                msg: `<span class="text-rose-200">${v.name}</span> withdrew from negotiation — pricing floor reached internally`
-              });
-              return;
-            }
-            if (v.rounds[r] != null) {
-              const prev = r === 0 ? scenario.lastPrice : v.rounds[r - 1] ?? scenario.lastPrice;
-              const cur = v.rounds[r];
-              const drop = prev ? ((prev - cur) / prev * 100).toFixed(1) : '0.0';
-              const isHittingFloor = v.hitFloor && r === numRounds - 1;
-              pushLog({
-                agent: 'Vendor',
-                tone: 'slate',
-                msg: `${v.name} → <span class="text-slate-100 num-tab">${formatINR(cur)}</span>/${scenario.unitShort} <span class="text-emerald-300">(▼${drop}%)</span>${isHittingFloor ? ' <span class="text-amber-300">· floor reached</span>' : ''}`
-              });
-            }
-          }
-        });
-        t += 200;
-      });
-      t += 400;
-    }
-    timeline.push({
-      at: t,
-      fn: () => {
-        setPhase('settled');
-        const w = scenario.vendors[scenario.winnerIndex];
-        pushLog({
-          agent: 'Negotiator',
-          tone: 'emerald',
-          msg: `<span class="text-emerald-200 font-semibold">Deal locked</span> · winner ${w.name} at ${formatINR(w.rounds[w.rounds.length - 1])}/${scenario.unitShort}`
-        });
+    // Strategy stream
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setStrategyVisible(i);
+      appendAudit(strategyLogs[i - 1]);
+      if (i >= strategyLogs.length) {
+        clearInterval(id);
+        setTimeout(() => setPhase('rounds'), 500);
       }
-    });
-    t += 1400;
-    timeline.push({
-      at: t,
-      fn: () => onComplete()
-    });
-    const timeouts = timeline.map(step => setTimeout(step.fn, step.at));
-    return () => timeouts.forEach(clearTimeout);
+    }, 520);
+    return () => clearInterval(id);
   }, []);
-  const totals = computeTotals(scenario);
-  const currentBest = useMemo(() => {
-    const active = scenario.vendors.filter((v, i) => !(v.dropOutAfterRound != null && roundIdx > v.dropOutAfterRound));
+  useEffect(() => {
+    if (phase !== 'rounds') return;
+    const timeouts = [];
+    let t = 200;
+    for (let r = 0; r < numRounds; r++) {
+      timeouts.push(setTimeout(() => {
+        setRoundIdx(r);
+        const activeVendors = scenario.vendors.filter(v => !(v.dropOutAfterRound != null && r > v.dropOutAfterRound + 1));
+        appendAudit({
+          phase: 'rounds',
+          agent: 'Negotiator',
+          sub: 'round_coordinator()',
+          tone: 'emerald',
+          msg: `<b>Round ${r + 1}</b> opened · ${activeVendors.length} active vendor${activeVendors.length === 1 ? '' : 's'} · counters dispatched`
+        });
+      }, t));
+      t += 700;
+      scenario.vendors.forEach(v => {
+        timeouts.push(setTimeout(() => {
+          const isAlreadyDropped = v.dropOutAfterRound != null && r > v.dropOutAfterRound + 1;
+          const justDropped = v.dropOutAfterRound != null && r === v.dropOutAfterRound + 1;
+          if (isAlreadyDropped) return;
+          if (justDropped) {
+            appendAudit({
+              phase: 'rounds',
+              agent: 'Negotiator',
+              sub: 'walkaway_detector()',
+              tone: 'rose',
+              msg: `<b>${v.name}</b> withdrew from negotiation · signaled internal pricing floor reached`
+            });
+            return;
+          }
+          if (v.rounds[r] != null) {
+            const drop = pctBelow(v.rounds[r], scenario.lastPrice);
+            const isHittingFloor = v.hitFloor && r === numRounds - 1;
+            appendAudit({
+              phase: 'rounds',
+              agent: 'Vendor',
+              sub: `${v.name.split(' ')[0].toLowerCase()}.counter_offer()`,
+              tone: 'slate',
+              msg: `<b>${v.name}</b> → <b>${formatINR(v.rounds[r])}</b>/${scenario.unitShort} · <b>${drop}%</b> below baseline${isHittingFloor ? ' <span class="text-amber-300">· floor reached</span>' : ''}`
+            });
+          }
+        }, t));
+        t += 220;
+      });
+      t += 350;
+    }
+    timeouts.push(setTimeout(() => {
+      const w = scenario.vendors[scenario.winnerIndex];
+      const wPrice = w.rounds[w.rounds.length - 1];
+      const wPct = pctBelow(wPrice, scenario.lastPrice);
+      appendAudit({
+        phase: 'rounds',
+        agent: 'Negotiator',
+        sub: 'round_coordinator.settle()',
+        tone: 'emerald',
+        msg: `<b>Deal locked</b> · winner <b>${w.name}</b> at <b>${formatINR(wPrice)}</b>/${scenario.unitShort} (${wPct}% below baseline)`
+      });
+      setPhase('settled');
+    }, t));
+    return () => timeouts.forEach(clearTimeout);
+  }, [phase]);
+  const currentBestPrice = useMemo(() => {
+    if (roundIdx < 0) return scenario.lastPrice;
+    const active = scenario.vendors.filter(v => !(v.dropOutAfterRound != null && roundIdx > v.dropOutAfterRound + 1));
     const prices = active.map(v => v.rounds[Math.min(roundIdx, v.rounds.length - 1)]).filter(p => p != null);
-    return prices.length ? Math.min(...prices) : scenario.lastPrice;
+    if (!prices.length) return scenario.lastPrice;
+    return Math.min(...prices);
   }, [roundIdx, scenario]);
-  const currentBestTotal = currentBest * scenario.quantity;
-  const baselineTotal = scenario.lastPrice * scenario.quantity;
-  const savedSoFar = baselineTotal - currentBestTotal;
-  const savedPct = savedSoFar / baselineTotal * 100;
+  const activePhaseId = phase === 'strategy' ? 'strategy' : 'rounds';
   return /*#__PURE__*/React.createElement("div", {
-    className: "max-w-7xl mx-auto px-6 py-8 space-y-6"
+    className: "max-w-7xl mx-auto px-6 py-8"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between flex-wrap gap-3"
+    className: "flex items-center justify-between flex-wrap gap-3 mb-5"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] uppercase tracking-[0.15em] font-semibold text-blue-600 mb-1"
   }, "Negotiation theater · live"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[26px] font-bold text-slate-900 tracking-tight leading-tight"
-  }, "Negotiator Agent is working with 3 vendors"), /*#__PURE__*/React.createElement("div", {
+  }, "Negotiator agent + sub-agents at work"), /*#__PURE__*/React.createElement("div", {
     className: "text-[13px] text-slate-500 mt-1"
   }, scenario.flavor)), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-4"
-  }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-sm"
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-2 h-2 rounded-full ${phase === 'settled' ? 'bg-emerald-500' : 'bg-blue-500 pulse-soft'}`
   }), /*#__PURE__*/React.createElement("div", {
     className: "text-[12px] font-mono text-slate-600"
-  }, "round ", /*#__PURE__*/React.createElement("span", {
+  }, "phase ", /*#__PURE__*/React.createElement("span", {
+    className: "text-slate-900 font-semibold"
+  }, phase), phase === 'rounds' && roundIdx >= 0 && /*#__PURE__*/React.createElement(React.Fragment, null, " · round ", /*#__PURE__*/React.createElement("span", {
     className: "text-slate-900 font-semibold"
   }, Math.min(roundIdx + 1, numRounds)), " / ", numRounds)))), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-1 md:grid-cols-3 gap-4"
+    className: "grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5"
   }, scenario.vendors.map((v, vi) => /*#__PURE__*/React.createElement(VendorCard, {
     key: v.name,
     vendor: v,
     scenario: scenario,
-    roundIdx: roundIdx,
+    roundIdx: Math.max(0, roundIdx),
     isWinner: phase === 'settled' && vi === scenario.winnerIndex,
     phase: phase
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4"
+    className: "grid grid-cols-1 lg:grid-cols-[1.05fr_1.4fr] gap-4"
   }, /*#__PURE__*/React.createElement(PriceTracker, {
     scenario: scenario,
-    currentBest: currentBest,
-    currentBestTotal: currentBestTotal,
-    savedSoFar: savedSoFar,
-    savedPct: savedPct,
+    currentBestPrice: currentBestPrice,
     phase: phase
   }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-2"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] uppercase tracking-[0.15em] font-semibold text-slate-500"
-  }, "Negotiator activity"), /*#__PURE__*/React.createElement("button", {
+  }, "Agent activity · live"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowConsole(!showConsole),
     className: `flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full transition-all ${showConsole ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`
   }, /*#__PURE__*/React.createElement(Icon, {
     name: showConsole ? 'eye' : 'eyeOff',
     className: "w-3 h-3"
-  }), showConsole ? 'Hide' : 'Show')), showConsole ? /*#__PURE__*/React.createElement(AgentConsole, {
-    logs: miniLogs,
+  }), showConsole ? 'Hide' : 'Show')), showConsole ? /*#__PURE__*/React.createElement(SectionedConsole, {
+    logs: auditTrail,
+    activePhaseId: activePhaseId,
     streaming: phase !== 'settled',
     title: "merlin · negotiator.log",
-    maxHeight: "max-h-[280px]"
+    maxHeight: "max-h-[460px]",
+    defaultCollapsed: false
   }) : /*#__PURE__*/React.createElement(ConsoleCollapsed, {
-    count: miniLogs.length
-  }))));
+    count: auditTrail.length
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "mt-6"
+  }, /*#__PURE__*/React.createElement(ContinueBar, {
+    enabled: phase === 'settled',
+    onClick: onContinue,
+    label: "Continue to Governance Gate",
+    sub: phase === 'settled' ? 'Deal locked · awaiting policy check' : phase === 'strategy' ? 'Setting target & dispatching RFQs…' : `Round ${Math.min(roundIdx + 1, numRounds)} of ${numRounds} in progress`
+  })));
 };
 const VendorCard = ({
   vendor,
@@ -1311,9 +1826,12 @@ const VendorCard = ({
   phase
 }) => {
   const isDroppedOut = vendor.dropOutAfterRound != null && roundIdx > vendor.dropOutAfterRound;
-  const currentPrice = isDroppedOut ? vendor.rounds[vendor.dropOutAfterRound] : vendor.rounds[Math.min(roundIdx, vendor.rounds.length - 1)] ?? scenario.lastPrice;
-  const prevPrice = roundIdx === 0 ? scenario.lastPrice : vendor.rounds[roundIdx - 1] ?? scenario.lastPrice;
-  const delta = prevPrice && currentPrice ? prevPrice - currentPrice : 0;
+  const lastValidRound = isDroppedOut ? vendor.dropOutAfterRound : Math.min(roundIdx, vendor.rounds.length - 1);
+  const currentPrice = vendor.rounds[lastValidRound] ?? scenario.lastPrice;
+  const prevPrice = lastValidRound === 0 ? scenario.lastPrice : vendor.rounds[lastValidRound - 1] ?? scenario.lastPrice;
+  const currentIdx = indexOf(currentPrice, scenario.lastPrice);
+  const currentPctOff = pctBelow(currentPrice, scenario.lastPrice);
+  const delta = prevPrice - currentPrice;
   const deltaPct = prevPrice ? (delta / prevPrice * 100).toFixed(1) : '0.0';
   return /*#__PURE__*/React.createElement("div", {
     className: `relative bg-white rounded-2xl border transition-all overflow-hidden ${isWinner ? 'border-emerald-300 shadow-lg shadow-emerald-100/60 ring-2 ring-emerald-100' : isDroppedOut ? 'border-slate-200 opacity-60 grayscale' : 'border-slate-200 shadow-sm'}`
@@ -1334,26 +1852,35 @@ const VendorCard = ({
   }, vendor.location, " · SLA ", vendor.sla))), /*#__PURE__*/React.createElement(StatusBadge, {
     isWinner: isWinner,
     isDroppedOut: isDroppedOut,
-    phase: phase,
-    hitFloor: vendor.hitFloor && roundIdx === vendor.rounds.length - 1 && !isWinner ? false : vendor.hitFloor && isWinner
+    phase: phase
   })), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1 mb-3"
+    className: "flex items-center gap-1 mb-2"
   }, [1, 2, 3, 4, 5].map(n => /*#__PURE__*/React.createElement("span", {
     key: n,
     className: `w-3 h-3 rounded-sm ${n <= Math.floor(vendor.rating) ? 'bg-amber-400' : n - 0.5 <= vendor.rating ? 'bg-amber-300' : 'bg-slate-200'}`
   })), /*#__PURE__*/React.createElement("span", {
     className: "text-[11px] text-slate-500 ml-1.5 font-medium num-tab"
   }, vendor.rating.toFixed(1))), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-1 mb-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium"
+  }, "Crisil ", vendor.credit), /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium"
+  }, "ESG ", vendor.esg), vendor.msme && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-700 font-medium"
+  }, "MSME")), /*#__PURE__*/React.createElement("div", {
     className: `rounded-xl p-3.5 ${isWinner ? 'bg-emerald-50/60' : isDroppedOut ? 'bg-slate-50' : 'gradient-bg-soft'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-baseline justify-between gap-2"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] uppercase tracking-wider text-slate-500 font-semibold"
   }, "Current offer"), /*#__PURE__*/React.createElement("div", {
-    className: `text-[26px] font-bold num-tab leading-tight ${isWinner ? 'text-emerald-700' : isDroppedOut ? 'text-slate-400 line-through' : 'text-slate-900'}`
+    className: `text-[28px] font-bold num-tab leading-none ${isWinner ? 'text-emerald-700' : isDroppedOut ? 'text-slate-400 line-through' : 'text-slate-900'}`
   }, formatINR(currentPrice)), /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] text-slate-500 mt-0.5"
-  }, "per ", scenario.unitShort, " · ×", scenario.quantity)), !isDroppedOut && delta > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "per ", scenario.unitShort, " · ×", scenario.quantity, " · ", currentPctOff > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("b", {
+    className: "text-emerald-600 num-tab"
+  }, "▼ ", currentPctOff, "%"), " vs. baseline") : 'opening')), !isDroppedOut && delta > 0 && /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1 text-[12px] font-semibold text-emerald-600 num-tab tick-down",
     key: `${vendor.name}-${roundIdx}`
   }, /*#__PURE__*/React.createElement(Icon, {
@@ -1374,13 +1901,12 @@ const VendorCard = ({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "flag",
     className: "w-3.5 h-3.5"
-  }), " Withdrew at round ", vendor.dropOutAfterRound + 1)));
+  }), " Withdrew after round ", vendor.dropOutAfterRound + 1)));
 };
 const StatusBadge = ({
   isWinner,
   isDroppedOut,
-  phase,
-  hitFloor
+  phase
 }) => {
   if (isWinner) return /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500 text-white text-[10.5px] font-semibold tracking-wide"
@@ -1402,15 +1928,19 @@ const StatusBadge = ({
 };
 const PriceTracker = ({
   scenario,
-  currentBest,
-  currentBestTotal,
-  savedSoFar,
-  savedPct,
+  currentBestPrice,
   phase
 }) => {
-  const min = scenario.targetPrice * 0.95;
-  const max = scenario.lastPrice;
-  const pct = Math.max(0, Math.min(100, (max - currentBest) / (max - min) * 100));
+  const targetPrice = Math.round(scenario.lastPrice * scenario.targetIndex / 100);
+  const floorPrice = Math.round(scenario.lastPrice * scenario.floorIndex / 100);
+  const baselineTotal = scenario.lastPrice * scenario.quantity;
+  const currentBestTotal = currentBestPrice * scenario.quantity;
+  const savedSoFar = baselineTotal - currentBestTotal;
+  const pctOff = pctBelow(currentBestPrice, scenario.lastPrice);
+  const minPrice = floorPrice * 0.98;
+  const maxPrice = scenario.lastPrice * 1.02;
+  const pct = Math.max(0, Math.min(100, (maxPrice - currentBestPrice) / (maxPrice - minPrice) * 100));
+  const targetPct = (maxPrice - targetPrice) / (maxPrice - minPrice) * 100;
   return /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl border border-slate-200 shadow-sm p-5"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1421,7 +1951,7 @@ const PriceTracker = ({
     className: "flex items-baseline gap-2 mt-1"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[28px] font-bold text-slate-900 num-tab leading-none"
-  }, formatINR(currentBest)), /*#__PURE__*/React.createElement("div", {
+  }, formatINR(currentBestPrice)), /*#__PURE__*/React.createElement("div", {
     className: "text-[12px] text-slate-500"
   }, "per ", scenario.unitShort)), /*#__PURE__*/React.createElement("div", {
     className: "text-[12px] text-slate-500 mt-1 num-tab"
@@ -1435,7 +1965,7 @@ const PriceTracker = ({
     className: "text-[22px] font-bold text-emerald-600 num-tab leading-tight"
   }, formatINR(savedSoFar)), /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-emerald-700/80 num-tab"
-  }, savedPct.toFixed(1), "% below baseline"))), /*#__PURE__*/React.createElement("div", {
+  }, pctOff > 0 ? `${pctOff}% below baseline` : 'no movement yet'))), /*#__PURE__*/React.createElement("div", {
     className: "relative h-2.5 rounded-full bg-slate-100 overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
     className: "absolute inset-y-0 left-0 gradient-bg transition-all duration-700 ease-out",
@@ -1445,117 +1975,108 @@ const PriceTracker = ({
   }), /*#__PURE__*/React.createElement("div", {
     className: "absolute top-1/2 -translate-y-1/2 h-3 w-0.5 bg-slate-400",
     style: {
-      left: `${(max - scenario.targetPrice) / (max - min) * 100}%`
+      left: `${targetPct}%`
     }
   })), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between mt-1.5 text-[10.5px] text-slate-500 num-tab"
   }, /*#__PURE__*/React.createElement("span", null, "baseline ", formatINR(scenario.lastPrice)), /*#__PURE__*/React.createElement("span", {
     className: "font-medium text-slate-700"
-  }, "target ", formatINR(scenario.targetPrice)), /*#__PURE__*/React.createElement("span", null, "floor ", formatINR(Math.round(min)))));
+  }, "target ", formatINR(targetPrice)), /*#__PURE__*/React.createElement("span", null, "floor ", formatINR(floorPrice))));
 };
 
 /* ============================================================
-   SCREEN 4 — GOVERNANCE GATE
+   SCREEN 4 — GOVERNANCE (tier-based, no rupees)
    ============================================================ */
-
 const GovernanceScreen = ({
   scenario,
   totals,
+  auditTrail,
   appendAudit,
   decision,
   setDecision,
-  onComplete
+  onContinue
 }) => {
-  const isOver = totals.finalTotal >= POLICY_THRESHOLD;
-  const advanced = useRef(false);
+  const govLogs = useMemo(() => buildGovernanceLogs(scenario, totals), [scenario, totals]);
+  const [visible, setVisible] = useState(0);
+  const [done, setDone] = useState(false);
   const [overrideRequested, setOverrideRequested] = useState(false);
+  const [showConsole, setShowConsole] = useState(true);
   useEffect(() => {
-    appendAudit({
-      agent: 'Governance',
-      tone: 'amber',
-      message: `Policy gate check · deal total ${formatINR(totals.finalTotal)} vs threshold ${formatINR(POLICY_THRESHOLD)}`,
-      phase: 'governance'
-    });
-    if (!isOver) {
-      appendAudit({
-        agent: 'Governance',
-        tone: 'emerald',
-        message: `Auto-approved · within policy threshold`,
-        phase: 'governance'
-      });
-      setDecision('auto-approved');
-      const t = setTimeout(() => {
-        if (!advanced.current) {
-          advanced.current = true;
-          onComplete();
-        }
-      }, 2600);
-      return () => clearTimeout(t);
-    } else {
-      appendAudit({
-        agent: 'Governance',
-        tone: 'rose',
-        message: `Above auto-approve threshold · routing to human approver`,
-        phase: 'governance'
-      });
-    }
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setVisible(i);
+      appendAudit(govLogs[i - 1]);
+      if (i >= govLogs.length) {
+        clearInterval(id);
+        setDone(true);
+        if (!totals.requiresHuman) setDecision('auto-approved');
+      }
+    }, 550);
+    return () => clearInterval(id);
   }, []);
   const handleApprove = () => {
     appendAudit({
+      phase: 'governance',
       agent: 'Governance',
+      sub: 'human_approver.accept()',
       tone: 'emerald',
-      message: `Human approver accepted recommendation · proceeding to PO`,
-      phase: 'governance'
+      message: 'Human approver accepted recommendation · proceeding to PO',
+      msg: 'Human approver accepted recommendation · proceeding to PO'
     });
     setDecision('human-approved');
-    onComplete();
   };
   const handleOverride = () => {
     if (overrideRequested) return;
     appendAudit({
+      phase: 'governance',
       agent: 'Governance',
+      sub: 'human_approver.override()',
       tone: 'amber',
-      message: `Human approver requested re-negotiation · agent will retry with stricter targets`,
-      phase: 'governance'
+      message: 'Override requested · negotiator re-briefed with stricter targets',
+      msg: 'Override requested · negotiator re-briefed with stricter targets'
     });
     setOverrideRequested(true);
   };
+  const canContinue = totals.requiresHuman ? decision === 'human-approved' : done;
   return /*#__PURE__*/React.createElement("div", {
-    className: "max-w-5xl mx-auto px-6 py-10"
+    className: "max-w-7xl mx-auto px-6 py-8"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-center mb-8 fade-in"
+    className: "text-center mb-6 fade-in"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] uppercase tracking-[0.15em] font-semibold text-blue-600 mb-2"
   }, "Governance gate"), /*#__PURE__*/React.createElement("h2", {
     className: "text-[28px] font-bold text-slate-900 tracking-tight"
   }, "Suite governs"), /*#__PURE__*/React.createElement("p", {
     className: "text-slate-500 mt-1 text-[14px]"
-  }, "Every deal is checked against your written policy before it can proceed.")), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-5 fade-in"
+  }, "Every deal is classified by tier and checked against your written policy before it can proceed.")), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-[1.05fr_1fr] gap-6"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-start justify-between gap-4 flex-wrap"
+    className: "space-y-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl border border-slate-200 shadow-sm p-6 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-5 mb-5"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1"
-  }, "Final deal total"), /*#__PURE__*/React.createElement("div", {
-    className: "text-[36px] font-bold text-slate-900 num-tab leading-none"
-  }, formatINR(totals.finalTotal)), /*#__PURE__*/React.createElement("div", {
-    className: "text-[12.5px] text-slate-500 mt-1.5"
-  }, scenario.quantity, " × ", formatINR(totals.finalUnit), "/", scenario.unitShort, /*#__PURE__*/React.createElement("span", {
-    className: "mx-2 text-slate-300"
-  }, "·"), totals.winner.name)), /*#__PURE__*/React.createElement("div", {
-    className: "text-right"
-  }, /*#__PURE__*/React.createElement("div", {
+  }, "Deal classification"), /*#__PURE__*/React.createElement("div", {
+    className: `inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12.5px] font-semibold ${totals.tier === 'material' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`
+  }, /*#__PURE__*/React.createElement("span", {
+    className: `w-1.5 h-1.5 rounded-full ${totals.tier === 'material' ? 'bg-amber-500' : 'bg-emerald-500'}`
+  }), totals.tier === 'material' ? 'Material Order Tier' : 'Standard Order Tier'), /*#__PURE__*/React.createElement("div", {
+    className: "text-[12px] text-slate-500 mt-2 leading-relaxed"
+  }, totals.tier === 'material' ? `Above ${formatINR(POLICY_THRESHOLD)} auto-approve cutoff · requires human-in-the-loop` : `Within ${formatINR(POLICY_THRESHOLD)} auto-approve cutoff · agent issues PO directly`)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1"
-  }, "Policy threshold"), /*#__PURE__*/React.createElement("div", {
-    className: "text-[20px] font-bold text-slate-700 num-tab"
-  }, formatINR(POLICY_THRESHOLD)), /*#__PURE__*/React.createElement("div", {
-    className: "text-[11px] text-slate-400 mt-0.5"
-  }, "Doc P-04.2 §3.1"))), /*#__PURE__*/React.createElement("div", {
-    className: "mt-5"
-  }, /*#__PURE__*/React.createElement(ThresholdBar, {
+  }, "Final deal total"), /*#__PURE__*/React.createElement("div", {
+    className: "text-[28px] font-bold text-slate-900 num-tab leading-none"
+  }, formatINR(totals.finalTotal)), /*#__PURE__*/React.createElement("div", {
+    className: "text-[12px] text-slate-500 mt-1 num-tab"
+  }, scenario.quantity, " × ", formatINR(totals.winner.rounds[totals.winner.rounds.length - 1]), "/", scenario.unitShort), /*#__PURE__*/React.createElement("div", {
+    className: "text-[12px] text-emerald-700 font-medium num-tab mt-1"
+  }, "▼ ", formatINR(totals.baselineTotal - totals.finalTotal), " (", totals.savingsPct, "%)"))), /*#__PURE__*/React.createElement(ThresholdBar, {
     dealTotal: totals.finalTotal,
     threshold: POLICY_THRESHOLD
-  }))), !isOver && /*#__PURE__*/React.createElement("div", {
+  })), !totals.requiresHuman && /*#__PURE__*/React.createElement("div", {
     className: "bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-6 fade-in"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start gap-4"
@@ -1572,19 +2093,15 @@ const GovernanceScreen = ({
     className: "text-emerald-600 font-normal text-[14px]"
   }, "· within policy")), /*#__PURE__*/React.createElement("div", {
     className: "text-[13.5px] text-emerald-800/80 mt-1.5 leading-relaxed"
-  }, "Deal total of ", formatINR(totals.finalTotal), " is below the auto-approve threshold of ", formatINR(POLICY_THRESHOLD), ". No human approval required. Negotiator agent will issue PO and notify ", totals.winner.name, "."), /*#__PURE__*/React.createElement("div", {
-    className: "mt-3 flex items-center gap-2 text-[11px] text-emerald-700"
+  }, "Standard Order tier · no human approval required. Closer agent will draft the PO and notify ", /*#__PURE__*/React.createElement("strong", null, totals.winner.name), "."), /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 flex flex-wrap items-center gap-2 text-[11px] text-emerald-700"
   }, /*#__PURE__*/React.createElement("span", {
     className: "px-2 py-0.5 bg-white/70 rounded-full font-mono"
   }, "policy_check: pass"), /*#__PURE__*/React.createElement("span", {
     className: "px-2 py-0.5 bg-white/70 rounded-full font-mono"
-  }, "compliance: pass"), /*#__PURE__*/React.createElement("span", {
+  }, "risk: 2.1/10"), /*#__PURE__*/React.createElement("span", {
     className: "px-2 py-0.5 bg-white/70 rounded-full font-mono"
-  }, "budget: pass")))), /*#__PURE__*/React.createElement("div", {
-    className: "mt-4 text-[11.5px] text-emerald-700/70 flex items-center gap-1.5"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "w-3 h-3 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin"
-  }), "Proceeding to PO issuance…")), isOver && /*#__PURE__*/React.createElement("div", {
+  }, "esg: pass"))))), totals.requiresHuman && /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden fade-in"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bg-amber-50/70 px-6 py-3 border-b border-amber-100 flex items-center gap-3"
@@ -1597,7 +2114,7 @@ const GovernanceScreen = ({
     className: "text-[13.5px] font-semibold text-amber-900"
   }, "Human approval required"), /*#__PURE__*/React.createElement("div", {
     className: "text-[11.5px] text-amber-800/70"
-  }, "Deal exceeds auto-approve threshold by ", formatINR(totals.finalTotal - POLICY_THRESHOLD)))), /*#__PURE__*/React.createElement("div", {
+  }, "Material Order tier · routed to category manager"))), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-5"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold mb-2"
@@ -1608,17 +2125,17 @@ const GovernanceScreen = ({
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "check",
     className: "w-3.5 h-3.5 text-emerald-500 mt-1 shrink-0"
-  }), " Negotiated ", scenario.vendors[0].rounds.length, " rounds across 3 vetted vendors"), /*#__PURE__*/React.createElement("li", {
+  }), " Discovered ", scenario.discovered, " vendors · enriched, ranked, shortlisted top 3"), /*#__PURE__*/React.createElement("li", {
     className: "flex items-start gap-2"
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "check",
     className: "w-3.5 h-3.5 text-emerald-500 mt-1 shrink-0"
-  }), " Achieved ", totals.savingsPct.toFixed(1), "% below last-quarter baseline (", formatINR(totals.savings), " saved)"), /*#__PURE__*/React.createElement("li", {
+  }), " Ran ", scenario.vendors[0].rounds.length, "-round negotiation · achieved ", totals.savingsPct, "% below baseline (", formatINR(totals.baselineTotal - totals.finalTotal), " saved)"), /*#__PURE__*/React.createElement("li", {
     className: "flex items-start gap-2"
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "check",
     className: "w-3.5 h-3.5 text-emerald-500 mt-1 shrink-0"
-  }), " Verified compliance (MSME, GST, ESG) for all bidders"), scenario.consolidationNote && /*#__PURE__*/React.createElement("li", {
+  }), " Verified compliance (Crisil ", totals.winner.credit, " · ESG pass · ", totals.winner.msme ? 'MSME ✓' : 'non-MSME', ")"), scenario.consolidationNote && /*#__PURE__*/React.createElement("li", {
     className: "flex items-start gap-2"
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "sparkles",
@@ -1634,7 +2151,7 @@ const GovernanceScreen = ({
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-11 h-11 rounded-lg bg-gradient-to-br ${scenario.accent} text-white flex items-center justify-center shadow-sm font-bold`
   }, totals.winner.name[0]), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1"
+    className: "flex-1 min-w-0"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[14.5px] font-semibold text-slate-900"
   }, totals.winner.name), /*#__PURE__*/React.createElement("div", {
@@ -1645,7 +2162,7 @@ const GovernanceScreen = ({
     className: "text-[16px] font-bold text-slate-900 num-tab"
   }, formatINR(totals.finalTotal)), /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-emerald-600 font-medium num-tab"
-  }, "▼ ", formatINR(totals.savings), " (", totals.savingsPct.toFixed(1), "%)")))), overrideRequested && /*#__PURE__*/React.createElement("div", {
+  }, "▼ ", formatINR(totals.baselineTotal - totals.finalTotal), " (", totals.savingsPct, "%)")))), overrideRequested && /*#__PURE__*/React.createElement("div", {
     className: "rounded-xl border border-amber-200 bg-amber-50/70 p-4 flex items-start gap-3 fade-in"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-7 h-7 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0"
@@ -1654,20 +2171,19 @@ const GovernanceScreen = ({
     className: "w-4 h-4"
   })), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 text-[12.5px] text-amber-900 leading-relaxed"
-  }, /*#__PURE__*/React.createElement("strong", {
-    className: "text-amber-900"
-  }, "Override registered."), " Negotiator has been re-briefed with stricter targets and will report back. You can still approve the current deal below if you change your mind.")), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("strong", null, "Override registered."), " Negotiator has been re-briefed with stricter targets. You can still approve the current deal below.")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3 pt-1"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: handleApprove,
-    className: "flex-1 gradient-bg text-white px-5 py-3 rounded-xl text-[14px] font-semibold shadow-sm hover:shadow-lg hover:shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
+    disabled: decision === 'human-approved',
+    className: `flex-1 px-5 py-3 rounded-xl text-[14px] font-semibold transition-all flex items-center justify-center gap-2 ${decision === 'human-approved' ? 'bg-emerald-500 text-white' : 'gradient-bg text-white shadow-sm hover:shadow-lg hover:shadow-blue-500/20'}`
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "check",
     className: "w-4 h-4"
-  }), " Approve · issue PO"), /*#__PURE__*/React.createElement("button", {
+  }), " ", decision === 'human-approved' ? 'Approved' : 'Approve · issue PO'), /*#__PURE__*/React.createElement("button", {
     onClick: handleOverride,
-    disabled: overrideRequested,
-    className: `px-5 py-3 rounded-xl text-[14px] font-semibold border transition-all flex items-center gap-2 ${overrideRequested ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'}`
+    disabled: overrideRequested || decision === 'human-approved',
+    className: `px-5 py-3 rounded-xl text-[14px] font-semibold border transition-all flex items-center gap-2 ${overrideRequested || decision === 'human-approved' ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-700 bg-white hover:bg-slate-50'}`
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "refresh",
     className: "w-4 h-4"
@@ -1678,7 +2194,32 @@ const GovernanceScreen = ({
     className: "w-3 h-3"
   }), " Approver: ", /*#__PURE__*/React.createElement("span", {
     className: "font-mono"
-  }, "priya.sharma@coca-cola.in"), " · routed via Suite governance"))));
+  }, "priya.sharma@coca-cola.in"), " · routed via Suite governance")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-[10.5px] uppercase tracking-[0.15em] font-semibold text-slate-500"
+  }, "Agent activity · live"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowConsole(!showConsole),
+    className: `flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full transition-all ${showConsole ? 'bg-slate-900 text-white shadow-sm' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: showConsole ? 'eye' : 'eyeOff',
+    className: "w-3 h-3"
+  }), showConsole ? 'Hide' : 'Show')), showConsole ? /*#__PURE__*/React.createElement(SectionedConsole, {
+    logs: auditTrail,
+    activePhaseId: "governance",
+    streaming: !done || totals.requiresHuman && decision !== 'human-approved',
+    title: "merlin · governance.log",
+    maxHeight: "max-h-[560px]"
+  }) : /*#__PURE__*/React.createElement(ConsoleCollapsed, {
+    count: auditTrail.length
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "mt-6"
+  }, /*#__PURE__*/React.createElement(ContinueBar, {
+    enabled: canContinue,
+    onClick: onContinue,
+    label: "Continue to Outcome",
+    sub: canContinue ? totals.requiresHuman ? 'Human-approved · finalizing PO' : 'Auto-approved · finalizing PO' : totals.requiresHuman ? 'Awaiting your approval above' : 'Policy check in progress…'
+  })));
 };
 const ThresholdBar = ({
   dealTotal,
@@ -1716,20 +2257,35 @@ const ThresholdBar = ({
 };
 
 /* ============================================================
-   SCREEN 5 — OUTCOME + AUDIT
+   SCREEN 5 — OUTCOME (no rupees · full audit · closure)
    ============================================================ */
-
 const OutcomeScreen = ({
   scenario,
   totals,
   auditTrail,
   decision,
-  onReset
+  onReset,
+  appendAudit
 }) => {
+  const closureLogs = useMemo(() => buildClosureLogs(scenario, totals), [scenario, totals]);
+  const [appended, setAppended] = useState(false);
+  useEffect(() => {
+    if (appended) return;
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      appendAudit(closureLogs[i - 1]);
+      if (i >= closureLogs.length) {
+        clearInterval(id);
+        setAppended(true);
+      }
+    }, 400);
+    return () => clearInterval(id);
+  }, []);
   const dropOutVendor = scenario.vendors.find(v => v.dropOutAfterRound != null);
   const hitFloor = scenario.vendors.some(v => v.hitFloor);
   return /*#__PURE__*/React.createElement("div", {
-    className: "max-w-7xl mx-auto px-6 py-10"
+    className: "max-w-7xl mx-auto px-6 py-8"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-center mb-8 fade-in"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1745,21 +2301,23 @@ const OutcomeScreen = ({
     className: "text-[32px] font-bold text-slate-900 tracking-tight"
   }, "You saved ", /*#__PURE__*/React.createElement("span", {
     className: "gradient-text num-tab"
-  }, formatINR(totals.savings)), " · in ", decision === 'auto-approved' ? '~2 minutes' : '~4 minutes'), /*#__PURE__*/React.createElement("p", {
+  }, formatINR(totals.baselineTotal - totals.finalTotal)), " · in ", decision === 'auto-approved' ? '~2 minutes' : '~4 minutes'), /*#__PURE__*/React.createElement("p", {
     className: "text-slate-500 mt-1.5 text-[14px]"
   }, "Procured from ", /*#__PURE__*/React.createElement("span", {
     className: "font-medium text-slate-700"
-  }, totals.winner.name), " · ", scenario.quantity, " ", scenario.unitLabel, " @ ", formatINR(totals.finalUnit), "/", scenario.unitShort)), /*#__PURE__*/React.createElement("div", {
+  }, totals.winner.name), " · ", scenario.quantity, " ", scenario.unitLabel, " @ ", /*#__PURE__*/React.createElement("span", {
+    className: "font-medium text-slate-700 num-tab"
+  }, formatINR(totals.winner.rounds[totals.winner.rounds.length - 1]), "/", scenario.unitShort))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 fade-in"
   }, /*#__PURE__*/React.createElement(OutcomeStat, {
     icon: "rupee",
     accent: "from-emerald-500 to-teal-500",
     label: "Savings",
-    value: formatINR(totals.savings),
-    sub: `${totals.savingsPct.toFixed(1)}% below baseline`,
+    value: formatINR(totals.baselineTotal - totals.finalTotal),
+    sub: `${totals.savingsPct}% below baseline`,
     extra: /*#__PURE__*/React.createElement("span", {
-      className: "text-emerald-600 font-medium"
-    }, "▼ ", formatINR(totals.startingTotal), " → ", formatINR(totals.finalTotal))
+      className: "text-emerald-600 font-medium num-tab"
+    }, formatINR(totals.baselineTotal), " → ", formatINR(totals.finalTotal))
   }), /*#__PURE__*/React.createElement(OutcomeStat, {
     icon: "clock",
     accent: "from-blue-500 to-indigo-500",
@@ -1775,18 +2333,20 @@ const OutcomeScreen = ({
     label: "Vendor",
     value: totals.winner.name,
     sub: `★ ${totals.winner.rating} · ${totals.winner.location} · SLA ${totals.winner.sla}`,
-    extra: null
+    extra: /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-500 font-medium"
+    }, "Crisil ", totals.winner.credit, " · ESG pass", totals.winner.msme ? ' · MSME' : '')
   }), /*#__PURE__*/React.createElement(OutcomeStat, {
     icon: "shield",
     accent: "from-violet-500 to-fuchsia-500",
     label: "Compliance",
     value: "100%",
-    sub: "MSME · GST · ESG",
+    sub: "policy adherence",
     extra: /*#__PURE__*/React.createElement("span", {
       className: "text-violet-600 font-medium"
-    }, "policy P-04.2")
+    }, totals.tier === 'material' ? 'Material tier · human-approved' : 'Standard tier · auto-approved')
   })), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-1 lg:grid-cols-[1fr_1.15fr] gap-6"
+    className: "grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-6"
   }, /*#__PURE__*/React.createElement("div", {
     className: "space-y-4"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1806,18 +2366,28 @@ const OutcomeScreen = ({
     value: `${formatINR(scenario.lastPrice)}/${scenario.unitShort}`
   }), /*#__PURE__*/React.createElement(Row, {
     label: "Final price",
-    value: `${formatINR(totals.finalUnit)}/${scenario.unitShort}`,
+    value: `${formatINR(totals.winner.rounds[totals.winner.rounds.length - 1])}/${scenario.unitShort}`,
     highlight: true
   }), /*#__PURE__*/React.createElement(Row, {
-    label: "Total",
+    label: "Order total",
     value: formatINR(totals.finalTotal),
+    highlight: true
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Savings",
+    value: `${formatINR(totals.baselineTotal - totals.finalTotal)} · ${totals.savingsPct}%`,
     highlight: true
   }), /*#__PURE__*/React.createElement(Row, {
     label: "Vendor",
     value: `${totals.winner.name} · ${totals.winner.location}`
   }), /*#__PURE__*/React.createElement(Row, {
+    label: "Tier",
+    value: totals.tier === 'material' ? 'Material Order' : 'Standard Order'
+  }), /*#__PURE__*/React.createElement(Row, {
     label: "Approval path",
-    value: decision === 'human-approved' ? 'Human-approved (over threshold)' : 'Auto-approved (within policy)'
+    value: decision === 'human-approved' ? 'Human-approved' : 'Auto-approved'
+  }), /*#__PURE__*/React.createElement(Row, {
+    label: "Risk score",
+    value: "2.1 / 10 (low)"
   }))), (dropOutVendor || hitFloor || scenario.consolidationNote) && /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl border border-slate-200 shadow-sm p-6"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1833,13 +2403,13 @@ const OutcomeScreen = ({
     className: "w-1.5 h-1.5 rounded-full bg-rose-400 mt-2 shrink-0"
   }), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("strong", {
     className: "text-slate-900"
-  }, dropOutVendor.name), " withdrew mid-negotiation. Remaining 2 vendors competed harder — savings preserved.")), hitFloor && /*#__PURE__*/React.createElement("li", {
+  }, dropOutVendor.name), " withdrew mid-negotiation. Walkaway detector flagged it · remaining 2 vendors competed harder.")), hitFloor && /*#__PURE__*/React.createElement("li", {
     className: "flex items-start gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-amber-400 mt-2 shrink-0"
   }), /*#__PURE__*/React.createElement("span", null, "Negotiation hit a ", /*#__PURE__*/React.createElement("strong", {
     className: "text-slate-900"
-  }, "market floor"), ". Further pressure would risk SLA quality — agent stopped and locked the deal.")), scenario.consolidationNote && /*#__PURE__*/React.createElement("li", {
+  }, "market floor"), ". Further pressure risked SLA quality — agent stopped and locked the deal.")), scenario.consolidationNote && /*#__PURE__*/React.createElement("li", {
     className: "flex items-start gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0"
@@ -1874,11 +2444,11 @@ const OutcomeStat = ({
 })), /*#__PURE__*/React.createElement("div", {
   className: "text-[10.5px] uppercase tracking-wider text-slate-500 font-semibold"
 }, label)), /*#__PURE__*/React.createElement("div", {
-  className: "text-[22px] font-bold text-slate-900 num-tab leading-tight"
+  className: "text-[22px] font-bold text-slate-900 num-tab leading-tight truncate"
 }, value), /*#__PURE__*/React.createElement("div", {
   className: "text-[12px] text-slate-500 mt-0.5 truncate"
 }, sub), extra && /*#__PURE__*/React.createElement("div", {
-  className: "text-[11px] mt-2 num-tab"
+  className: "text-[11px] mt-2 num-tab truncate"
 }, extra));
 const Row = ({
   label,
@@ -1891,20 +2461,33 @@ const Row = ({
 }, label), /*#__PURE__*/React.createElement("dd", {
   className: `text-right ${highlight ? 'font-semibold text-slate-900' : 'text-slate-700'} num-tab`
 }, value));
-const AGENT_COLORS = {
-  Supervisor: 'bg-blue-50 text-blue-700 border-blue-200',
-  Memory: 'bg-violet-50 text-violet-700 border-violet-200',
-  Knowledge: 'bg-amber-50 text-amber-700 border-amber-200',
-  Tools: 'bg-teal-50 text-teal-700 border-teal-200',
-  Negotiator: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  Vendor: 'bg-slate-50 text-slate-600 border-slate-200',
-  Governance: 'bg-rose-50 text-rose-700 border-rose-200'
+
+/* ============================================================
+   AUDIT PANEL — bifurcated by phase, light theme
+   ============================================================ */
+const PHASE_LIGHT_BG = {
+  blue: 'bg-blue-50 text-blue-700 border-blue-200',
+  teal: 'bg-teal-50 text-teal-700 border-teal-200',
+  violet: 'bg-violet-50 text-violet-700 border-violet-200',
+  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  amber: 'bg-amber-50 text-amber-700 border-amber-200',
+  rose: 'bg-rose-50 text-rose-700 border-rose-200',
+  slate: 'bg-slate-50 text-slate-600 border-slate-200'
 };
 const AuditPanel = ({
   auditTrail
 }) => {
+  const grouped = useMemo(() => {
+    const g = {};
+    PHASES.forEach(p => g[p.id] = []);
+    auditTrail.forEach(e => {
+      if (g[e.phase]) g[e.phase].push(e);
+    });
+    return g;
+  }, [auditTrail]);
+  const [collapsed, setCollapsed] = useState({});
   return /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden h-fit lg:max-h-[680px] flex flex-col"
+    className: "bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden h-fit lg:max-h-[820px] flex flex-col"
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-slate-50/50 to-white"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1916,7 +2499,7 @@ const AuditPanel = ({
     className: "w-4 h-4"
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-[13.5px] font-semibold text-slate-900"
-  }, "Full audit trail"), /*#__PURE__*/React.createElement("div", {
+  }, "Full audit trail · 6 phases"), /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-slate-500"
   }, auditTrail.length, " agent events · timestamped · immutable"))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100"
@@ -1926,31 +2509,66 @@ const AuditPanel = ({
   }), /*#__PURE__*/React.createElement("span", {
     className: "text-[10.5px] font-semibold text-emerald-700 tracking-wide"
   }, "SOX-READY"))), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 overflow-y-auto scroll-fade p-2"
-  }, auditTrail.map((e, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    className: "flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50/70 transition-colors group"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-[10.5px] font-mono text-slate-400 mt-0.5 shrink-0 w-16"
-  }, e.ts), /*#__PURE__*/React.createElement("div", {
-    className: `text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 mt-0.5 ${AGENT_COLORS[e.agent] || AGENT_COLORS.Vendor}`
-  }, e.agent), /*#__PURE__*/React.createElement("div", {
-    className: "text-[12.5px] text-slate-700 leading-relaxed flex-1 break-words",
-    dangerouslySetInnerHTML: {
-      __html: stripDarkHtml(e.message)
-    }
-  })))), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 overflow-y-auto scroll-fade p-3"
+  }, PHASES.map((phase, pIdx) => {
+    const entries = grouped[phase.id];
+    if (entries.length === 0) return null;
+    const isCollapsed = collapsed[phase.id] ?? false;
+    return /*#__PURE__*/React.createElement("div", {
+      key: phase.id,
+      className: "mb-3 last:mb-0"
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setCollapsed(c => ({
+        ...c,
+        [phase.id]: !isCollapsed
+      })),
+      className: "w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-slate-50 transition-colors text-left"
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: isCollapsed ? 'chevRight' : 'chevDown',
+      className: "w-3 h-3 text-slate-400 shrink-0"
+    }), /*#__PURE__*/React.createElement("span", {
+      className: `w-5 h-5 rounded flex items-center justify-center shrink-0 border ${PHASE_LIGHT_BG[phase.tone]}`
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: phase.icon,
+      className: "w-3 h-3"
+    })), /*#__PURE__*/React.createElement("span", {
+      className: "font-mono text-[10px] text-slate-400 shrink-0"
+    }, "P", pIdx + 1), /*#__PURE__*/React.createElement("span", {
+      className: "font-semibold text-[11.5px] uppercase tracking-wider text-slate-700"
+    }, phase.label), /*#__PURE__*/React.createElement("span", {
+      className: "ml-auto text-[10.5px] font-mono text-slate-400"
+    }, entries.length, " events")), !isCollapsed && /*#__PURE__*/React.createElement("div", {
+      className: "ml-3 pl-4 border-l border-slate-200 mt-1 space-y-2"
+    }, entries.map((e, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      className: "flex items-start gap-2.5 py-1"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-[10.5px] font-mono text-slate-400 mt-0.5 shrink-0 w-16"
+    }, e.ts), /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 min-w-0"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-2"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: `text-[9.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border ${PHASE_LIGHT_BG[phase.tone]}`
+    }, e.agent), /*#__PURE__*/React.createElement("span", {
+      className: "font-mono text-[10.5px] text-slate-500 truncate"
+    }, e.sub)), /*#__PURE__*/React.createElement("div", {
+      className: "text-[12.5px] text-slate-700 leading-relaxed mt-0.5",
+      dangerouslySetInnerHTML: {
+        __html: (e.msg || e.message || '').replace(/<b>/g, '<b class="text-slate-900 font-semibold">')
+      }
+    }))))));
+  })), /*#__PURE__*/React.createElement("div", {
     className: "px-4 py-2.5 border-t border-slate-200 bg-slate-50/60 text-[10.5px] text-slate-500 font-mono flex items-center justify-between"
   }, /*#__PURE__*/React.createElement("span", null, "session_id: ", /*#__PURE__*/React.createElement("span", {
     className: "text-slate-700"
-  }, "mer-", Math.floor(auditTrail.length * 137 + 4912))), /*#__PURE__*/React.createElement("span", null, "signed by · merlin@zycus")));
+  }, "mer-", 4912 + scenarioOrEmpty(auditTrail))), /*#__PURE__*/React.createElement("span", null, "signed by · merlin@zycus")));
 };
-const stripDarkHtml = html => String(html || '').replace(/class="text-slate-100[^"]*"/g, 'class="text-slate-900 font-medium"').replace(/class="text-slate-500[^"]*"/g, 'class="text-slate-400"').replace(/class="text-emerald-200[^"]*"/g, 'class="text-emerald-700 font-semibold"').replace(/class="text-emerald-300[^"]*"/g, 'class="text-emerald-600"').replace(/class="text-blue-300[^"]*"/g, 'class="text-blue-700 font-medium"').replace(/class="text-amber-200[^"]*"/g, 'class="text-amber-700"').replace(/class="text-amber-300[^"]*"/g, 'class="text-amber-700"').replace(/class="text-rose-200[^"]*"/g, 'class="text-rose-700"');
+const scenarioOrEmpty = trail => trail.length;
 
 /* ============================================================
    MOUNT
    ============================================================ */
-
 ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
 </script>
 </body>
