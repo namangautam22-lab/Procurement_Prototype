@@ -205,7 +205,7 @@ const computeTotals = (s) => {
 
 const STEPS = [
   { key: 'intake',        label: 'Request' },
-  { key: 'orchestration', label: 'Orchestration' },
+  { key: 'orchestration', label: 'Vendor Discovery' },
   { key: 'negotiation',   label: 'Negotiation' },
   { key: 'governance',    label: 'Governance' },
   { key: 'outcome',       label: 'Outcome' },
@@ -872,8 +872,8 @@ const OrchestrationScreen = ({ scenario, auditTrail, appendAudit, onContinue }) 
                 {done ? <Icon name="check" className="w-5 h-5" /> : <div className="w-5 h-5 rounded-full border-[2.5px] border-white/40 border-t-white animate-spin"></div>}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[15px] font-semibold text-slate-900 leading-tight">{done ? 'Orchestration complete · ready for negotiation' : 'Understanding your request & finding vendors…'}</div>
-                <div className="text-[12px] text-slate-500 mt-0.5">Planning · Listing · Discovery</div>
+                <div className="text-[15px] font-semibold text-slate-900 leading-tight">{done ? 'Vendor discovery complete · ready for negotiation' : 'Understanding your request & finding vendors…'}</div>
+                <div className="text-[12px] text-slate-500 mt-0.5">Intent → Listing → Discovery → Shortlist</div>
               </div>
             </div>
 
@@ -1547,7 +1547,7 @@ const OutcomeScreen = ({ scenario, totals, auditTrail, decision, onReset, append
           {decision === 'human-approved' && <span className="text-emerald-600/70">· human-approved</span>}
           {decision === 'auto-approved' && <span className="text-emerald-600/70">· auto-approved</span>}
         </div>
-        <h2 className="text-[32px] font-bold text-slate-900 tracking-tight">You saved <span className="gradient-text num-tab">{formatINR(totals.baselineTotal - totals.finalTotal)}</span> · in {decision === 'auto-approved' ? '~2 minutes' : '~4 minutes'}</h2>
+        <h2 className="text-[32px] font-bold text-slate-900 tracking-tight">You saved <span className="gradient-text num-tab">{formatINR(totals.baselineTotal - totals.finalTotal)}</span> <span className="text-slate-400 font-normal">·</span> {totals.savingsPct}% below baseline</h2>
         <p className="text-slate-500 mt-1.5 text-[14px]">Procured from <span className="font-medium text-slate-700">{totals.winner.name}</span> · {scenario.quantity} {scenario.unitLabel} @ <span className="font-medium text-slate-700 num-tab">{formatINR(totals.winner.rounds[totals.winner.rounds.length - 1])}/{scenario.unitShort}</span></p>
       </div>
 
@@ -1562,9 +1562,9 @@ const OutcomeScreen = ({ scenario, totals, auditTrail, decision, onReset, append
         <OutcomeStat
           icon="clock" accent="from-blue-500 to-indigo-500"
           label="Time saved"
-          value="~3 days → 4 min"
-          sub="vs. manual procurement"
-          extra={<span className="text-blue-600 font-medium">~1080× faster</span>}
+          value="Touchless"
+          sub="no buyer hours needed"
+          extra={<span className="text-blue-600 font-medium">agent handled end-to-end</span>}
         />
         <OutcomeStat
           icon={scenario.iconKey} accent={scenario.accent}
@@ -1576,8 +1576,8 @@ const OutcomeScreen = ({ scenario, totals, auditTrail, decision, onReset, append
         <OutcomeStat
           icon="shield" accent="from-violet-500 to-fuchsia-500"
           label="Compliance"
-          value="100%"
-          sub="policy adherence"
+          value="Verified"
+          sub="MSME · ESG · GST · policy"
           extra={<span className="text-violet-600 font-medium">{totals.tier === 'material' ? 'Material tier · human-approved' : 'Standard tier · auto-approved'}</span>}
         />
       </div>
